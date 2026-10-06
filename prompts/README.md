@@ -6,7 +6,7 @@ run appends to (what was done, deviations and why, validation output).
 Do not start a prompt before the previous one's validation passes.
 
 | # | Prompt | Delivers |
-|---|---|---|
+| --- | --- | --- |
 | 0 | [base_project/00_01_red_doors.md](base_project/00_01_red_doors.md) | Vision, decisions, the eight doors, architecture, lessons, definition of done (read-only) |
 | 1 | [base_project/01_01_openshift_local_cluster.md](base_project/01_01_openshift_local_cluster.md) | CRC sized + running, namespaces, repo spine, Makefile |
 | 2 | [base_project/02_01_vault_seal_and_cluster.md](base_project/02_01_vault_seal_and_cluster.md) | Seal Vault + 3-node Vault Enterprise, Transit auto-unseal |

@@ -57,7 +57,7 @@ Kubernetes auth role `red-doors-api` (SA `red-doors-api`), policy `rd-api`:
 ### Endpoints (`/api/v1`)
 
 | Endpoint | Purpose |
-|---|---|
+| --- | --- |
 | `GET /doors` | registry: id, title, business item, method, story order, policy names, status of last attempt |
 | `GET /doors/:id` | detail incl. **policy text** read from Vault, owner/wrong-key identities, last N attempts |
 | `POST /doors/:id/knock` | machine doors 1,3,4,5,6,7; body `{ "as": "owner" \| "impostor" }`; header `X-Triggered-By` (from BFF session). Door 3: mint wrapped secret-id → pass the wrapping token to opener-3 (or replay a consumed one to the impostor). Door 6: read ciphertext from `merger_docs` → pass to opener-6 |
@@ -74,6 +74,11 @@ Kubernetes auth role `red-doors-api` (SA `red-doors-api`), policy `rd-api`:
 Error contract: `{ "error": "…", "code": "…", "request_id": "…" }`; 400/401/403/404/409/502 used consistently; Vault's own denial passed
 through as `outcome: denied` with Vault's status + errors (200 to the UI —
 a denied door is a successful demo, not an API error).
+
+Found in prompt 03: Vault answers an **expired client certificate** at
+`auth/cert/login` with **HTTP 500** (`x509: certificate has expired …`),
+not 4xx. Classify by Vault's error text for known auth failures, not by
+status code alone, so this shows as a denial with its real reason.
 
 ### Audit collector
 

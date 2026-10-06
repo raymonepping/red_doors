@@ -27,7 +27,7 @@ trusts Vault; Vault trusts Keycloak. Door 2 and door 8 run on that.
 - Seed (idempotent LDIF via a Job):
 
 | User | Groups | Role in the demo |
-|---|---|---|
+| --- | --- | --- |
 | `ada` | `board`, `staff` | opens door 2 |
 | `ben` | `staff` | **wrong key** at door 2 |
 | `cleo` | `requesters`, `staff` | asks for the launch codes (door 8) |

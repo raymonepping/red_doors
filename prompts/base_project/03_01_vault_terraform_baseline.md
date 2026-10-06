@@ -48,7 +48,7 @@ are short enough to show on screen.
 ### Engines and auth methods (`terraform/vault-doors/`)
 
 | Mount | Type | For |
-|---|---|---|
+| --- | --- | --- |
 | `doors/` | KV v2 | items behind doors 1, 2, 3, 5, 7, 8 |
 | `transit/` | Transit | key `merger-docs` (door 6), `exportable=false`, `deletion_allowed=false` |
 | `pki/`, `pki-int/` | PKI | root + intermediate CA "Red Doors Treasury CA"; role `treasury-client` (client certs only, `ttl=10m`, `max_ttl=30m`, CN pattern `opener-5.rd-doors`) |
@@ -60,7 +60,7 @@ Kubernetes auth roles (each bound to **one** service account in `rd-doors`,
 `token_ttl=5m`, `token_max_ttl=15m`, audience set):
 
 | Role | SA | Policy |
-|---|---|---|
+| --- | --- | --- |
 | `opener-1` | `opener-1` | `door-1`: `read` on `doors/data/1-production-deploy-key` |
 | `opener-4` | `opener-4` | `door-4`: `read` on `database/creds/payroll-reader` (engine in prompt 05) |
 | `opener-5-issuer` | `opener-5` | `door-5-issuer`: `update` on `pki-int/issue/treasury-client` **only** — the SA can cut a key but cannot open the door |
@@ -140,3 +140,67 @@ OIDC, control groups, database engine, VSO (prompts 04–05).
 ## Execution log
 
 Appended by each run: what was done, deviations and why, validation output.
+
+### Run 1 — 2026-10-06
+
+#### Done
+
+- `terraform/bootstrap` (namespace `red-doors`, policy `rd-admin`),
+  `terraform/vault-audit` (stdout file device **imported** via an `import`
+  block, not recreated; `audit_socket_address` variable ready for prompt 07),
+  `terraform/vault-doors` (KV v2 `doors/`, Transit `merger-docs`, PKI root →
+  issuing CA → role `treasury-client`, Kubernetes auth + 6 roles, AppRole
+  `door-3` with bounded lockout, cert auth role `treasury`, 8 policies from
+  `policies/*.hcl`). Vault provider 5.12.0, state in `.secrets/terraform/`.
+- `scripts/vault-admin.sh` (bootstrap + periodic admin token),
+  `scripts/tf.sh` (apply + `plan -detailed-exitcode` convergence check),
+  `scripts/seed-doors.sh`; `deploy/doors/serviceaccounts.yaml` (opener-1,3,4,5,6,7,
+  vso-door-7, impostor; automount off).
+- Make: `tf-bootstrap`, `vault-admin-token`, `tf-audit`, `door-identities`,
+  `tf-doors`, `seed`, `tf-all`.
+
+#### Deviations
+
+- **Admin token period 720h** (prompt said 24h) — same reason as the seal
+  token: a CRC stopped for days must not return with an expired token.
+- **Bootstrap uses the admin token once one exists**; root only when there is
+  no usable admin token. Verified from the audit log: rerun requests carried
+  policies `default, rd-admin`, never root.
+- **The impostor has a real identity**: policy `impostor` reads
+  `doors/data/0-lobby` only. Vault knows who it is and still refuses every
+  door — a stronger demo than a failed login.
+- **No plaintext in source**: the merger memo and board minutes are
+  generated from templates (target, price, codename, budget, city). The first
+  seed used fixed text that sat in the uncommitted draft script; both
+  secrets were regenerated from the templates before committing.
+- Probe pods (validation only) had to be pinned with
+  `openshift.io/required-scc: restricted-v2` + a hardened `securityContext`:
+  created by cluster-admin they were otherwise admitted under `anyuid`.
+  Prompt 06's real workloads must carry the same annotation and context.
+- Vault returns **HTTP 500** (not 4xx) for an expired client certificate at
+  `auth/cert/login`; noted in prompt 07 so the API maps it to "denied".
+
+#### Validation output
+
+```text
+make tf-all (first)   → bootstrap 2 added · audit 1 imported · doors 31 added · 8 values seeded · memo ciphertext only
+make tf-all (rerun)   → 0 added/changed/destroyed in all 3 modules; admin token reused; every value unchanged
+vault policy read door-6 → 5 lines: update on transit/decrypt/merger-docs
+probe pods (restricted-v2, random UID 1000690000) — 16 passed, 0 failed:
+  door 1  opener-1 reads deploy key ............................ OK
+          impostor reads deploy key ............................ 403 permission denied
+          impostor reads lobby notice .......................... OK
+          opener-1 SA claiming role opener-6 ................... 403 service account name not authorized
+  door 3  wrapping token creation_path = auth/approle/role/door-3/secret-id
+          first unwrap → secret-id; second unwrap .............. 400 (tamper evidence)
+          AppRole login → partner API key ...................... OK
+          reuse of single-use secret-id ........................ denied
+  door 5  issuer (key-cutter) token reads wire room ............ 403 preflight capability check
+          fresh 10-min cert → cert login → wire room ........... OK
+          self-signed cert, right CN ........................... 400 failed to match all constraints
+          genuine cert 3 s past not-after ...................... 500 x509: certificate has expired
+  door 6  opener-6 decrypts memo ............................... OK
+          opener-6 encrypts .................................... 403
+          impostor decrypts .................................... 403
+door values / memo text in Terraform state, terraform/, deploy/, scripts/ → 0 hits
+```

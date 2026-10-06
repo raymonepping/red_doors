@@ -46,7 +46,7 @@ receiving; VSO last sync < 2 × refresh; **each door knocked once as owner
 ### Scenarios (`scenarios/NN_name/run.sh`, each prints what to watch in the UI)
 
 | # | Scenario | Expected |
-|---|---|---|
+| --- | --- | --- |
 | 01 | Kill the active Vault pod mid-demo | a standby takes over; a door knocked during failover succeeds within seconds; the Cluster page shows leadership move; the pod rejoins unsealed |
 | 02 | Seal Vault pod restarts | it comes back **sealed**; the main cluster keeps serving (already unsealed); `make vault-unseal` restores it; Cluster page shows the seal chain state honestly |
 | 03 | Cold start (`make down && make up`) | after unsealing the seal Vault, the main cluster auto-unseals with no operator keys |

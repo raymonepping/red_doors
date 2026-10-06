@@ -55,3 +55,26 @@ vault-down: ## Scale both Vaults to 0 — PVCs are never deleted
 
 vault-ui: ## Open the main Vault UI (https://vault.apps-crc.testing)
 	@./scripts/vault.sh ui
+
+# ── Vault configuration: Terraform baseline (prompt 03) ─────────────────────
+.PHONY: tf-bootstrap vault-admin-token tf-audit tf-doors door-identities seed tf-all
+
+tf-bootstrap: ## Root, once: namespace red-doors + policy rd-admin, then a periodic admin token
+	@./scripts/vault-admin.sh bootstrap
+
+vault-admin-token: ## Ensure .secrets/vault/admin-token is valid (re-issue if missing/expiring)
+	@./scripts/vault-admin.sh token
+
+tf-audit: ## Audit devices (stdout file device adopted into state; socket device in prompt 07)
+	@./scripts/tf.sh vault-audit
+
+door-identities: ## Service accounts in rd-doors that Vault's Kubernetes auth roles bind to
+	@source scripts/lib.sh && require_kubeconfig && oc apply -f deploy/doors/serviceaccounts.yaml
+
+tf-doors: door-identities ## Engines, auth methods, roles and per-door policies in namespace red-doors
+	@./scripts/tf.sh vault-doors
+
+seed: ## Write the business items behind the doors (only if absent — never changes them)
+	@./scripts/seed-doors.sh
+
+tf-all: tf-bootstrap tf-audit tf-doors seed ## All of the above, in order

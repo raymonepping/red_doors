@@ -44,7 +44,7 @@ share credentials and the API never holds theirs.
 ### Per-door behaviour
 
 | Door | Knock |
-|---|---|
+| --- | --- |
 | 1 | Projected SA token (`audience: vault`, `expirationSeconds: 600`) → `auth/kubernetes/login` role `opener-1` → read `doors/data/1-production-deploy-key` |
 | 3 | Role-id from a ConfigMap (not secret on its own). The API passes a **wrapping token**; the opener first `sys/wrapping/lookup`s it and checks `creation_path = auth/approle/role/door-3/secret-id` (tamper evidence: if anyone unwrapped it first, unwrap fails and the opener reports `tampered`), then unwraps, logs in, reads |
 | 4 | Kubernetes login → `database/creds/payroll-reader` → connect to `postgres.rd-data.svc` with those creds → `SELECT … FROM payroll LIMIT 5` + `count(*)` → return rows, generated username, lease TTL → revoke-self |

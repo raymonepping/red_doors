@@ -42,7 +42,7 @@ meaningful at every door.
 ## 2. Decisions already made (do not re-litigate)
 
 | Area | Decision |
-|---|---|
+| --- | --- |
 | Platform | **Full OpenShift Local** (CRC 2.64 / OpenShift 4.22, arm64, `vfkit`). Not MicroShift — door 7 needs OperatorHub and the console is part of the show. |
 | Vault | **Vault Enterprise**, new cluster, **3-node Raft HA**, official Helm chart in OpenShift mode (`global.openshift=true`). |
 | Auto-unseal | **In-cluster seal Vault**: a separate 1-node Vault Enterprise in its own namespace provides **Transit auto-unseal** for the main cluster. Same pattern as `vault-s` in Arcanium/Durin. The seal Vault itself is Shamir-sealed and unsealed by `make` from `.secrets/` — it is the root of trust and that is said out loud in the docs. |
@@ -64,7 +64,7 @@ Order = corridor (story) order: machine identity → humans → data →
 governance. Door numbers are stable IDs; never renumber.
 
 | # | Door (business item) | Opened by | Behind it (real value) |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | **Production deploy key** | **Kubernetes auth** — the opener pod's projected service-account token is its only credential | KV v2 secret (the deploy key) |
 | 2 | **Board minutes** | **OIDC (human)** — a person signs in via Keycloak; Vault maps their LDAP group to a policy | KV v2 secret readable only by the `board` group |
 | 3 | **Partner API key** | **AppRole** — role-id baked into the opener, secret-id delivered **response-wrapped** by a trusted orchestrator that can wrap but never unwrap | KV v2 secret |
@@ -190,7 +190,7 @@ Before writing code, read these and list what you reuse and what you change:
 ## 7. Delivery plan (execute in order; each prompt ends with an execution log)
 
 | Prompt | Delivers |
-|---|---|
+| --- | --- |
 | `01_01_openshift_local_cluster.md` | CRC sized + running, `oc` access, namespaces, repo skeleton, Makefile spine |
 | `02_01_vault_seal_and_cluster.md` | TLS CA, seal Vault, 3-node Vault Enterprise with Transit auto-unseal, Routes, init/unseal automation |
 | `03_01_vault_terraform_baseline.md` | Audit devices, secrets engines, auth methods, per-door policies, admin token model |
