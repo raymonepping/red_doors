@@ -102,3 +102,15 @@ door7-rotate: ## Write a new customer-DB password in Vault — watch VSO sync it
 
 door7-status: ## VaultStaticSecret + synced Secret metadata (never the value)
 	@./scripts/vso.sh status
+
+# ── Door openers (prompt 06) ────────────────────────────────────────────────
+.PHONY: openers-up knock knock-wrong
+
+openers-up: ## Build (in-cluster, on change) and deploy the seven door openers
+	@./scripts/doors.sh up
+
+knock: ## Knock on a machine door as its owner: make knock DOOR=4
+	@./scripts/doors.sh knock $(DOOR)
+
+knock-wrong: ## Same door, the impostor's identity: make knock-wrong DOOR=4
+	@./scripts/doors.sh knock-wrong $(DOOR)

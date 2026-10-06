@@ -1,0 +1,359 @@
+# Door openers (prompt 06), namespace rd-doors. One image, seven identities.
+#
+# Each Deployment mounts ONLY its own credential source:
+#   opener-1/4/6, impostor : projected SA token (audience vault)
+#   opener-3               : role-id ConfigMap (secret-id arrives wrapped per knock)
+#   opener-5               : projected SA token for the key cutter (cert issued per knock)
+#   opener-7               : the VSO-synced Secret — no Vault address, token or role
+# ConfigMap opener-3-role-id and Secret impostor-forged-cert are created by
+# scripts/doors.sh (values come from Vault / openssl, never from this file).
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata: { name: opener, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata: { name: opener, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  source: { type: Binary }
+  strategy: { type: Docker, dockerStrategy: {} }
+  output: { to: { kind: ImageStreamTag, name: "opener:latest" } }
+  resources: { limits: { memory: 1Gi } }
+---
+# ── opener-1 — Kubernetes auth ───────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opener-1
+  namespace: rd-doors
+  labels: { app.kubernetes.io/part-of: red-doors, app: opener, red-doors/door: "1" }
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"opener:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"opener\")].image"}]'
+spec:
+  replicas: 1
+  selector: { matchLabels: { red-doors/opener: "1" } }
+  template:
+    metadata:
+      labels: { app: opener, red-doors/opener: "1", app.kubernetes.io/part-of: red-doors }
+      annotations: { openshift.io/required-scc: restricted-v2 }
+    spec:
+      serviceAccountName: opener-1
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: opener
+          image: image-registry.openshift-image-registry.svc:5000/rd-doors/opener:latest
+          env:
+            - { name: DOOR_ID, value: "1" }
+            - { name: SERVICE_ACCOUNT, value: opener-1 }
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /health, port: 8080 }, periodSeconds: 10 }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] }, readOnlyRootFilesystem: true }
+          resources: { requests: { cpu: 10m, memory: 48Mi }, limits: { memory: 128Mi } }
+          volumeMounts:
+            - { name: vault-token, mountPath: /var/run/secrets/vault, readOnly: true }
+            - { name: ca, mountPath: /ca, readOnly: true }
+      volumes:
+        - name: vault-token
+          projected: { sources: [ { serviceAccountToken: { audience: vault, expirationSeconds: 600, path: token } } ] }
+        - name: ca
+          configMap: { name: red-doors-ca }
+---
+# ── opener-3 — AppRole (role-id at rest, secret-id wrapped per knock) ────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opener-3
+  namespace: rd-doors
+  labels: { app.kubernetes.io/part-of: red-doors, app: opener, red-doors/door: "3" }
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"opener:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"opener\")].image"}]'
+spec:
+  replicas: 1
+  selector: { matchLabels: { red-doors/opener: "3" } }
+  template:
+    metadata:
+      labels: { app: opener, red-doors/opener: "3", app.kubernetes.io/part-of: red-doors }
+      annotations: { openshift.io/required-scc: restricted-v2 }
+    spec:
+      serviceAccountName: opener-3
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: opener
+          image: image-registry.openshift-image-registry.svc:5000/rd-doors/opener:latest
+          env:
+            - { name: DOOR_ID, value: "3" }
+            - { name: SERVICE_ACCOUNT, value: opener-3 }
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /health, port: 8080 }, periodSeconds: 10 }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] }, readOnlyRootFilesystem: true }
+          resources: { requests: { cpu: 10m, memory: 48Mi }, limits: { memory: 128Mi } }
+          volumeMounts:
+            - { name: role-id, mountPath: /approle, readOnly: true }
+            - { name: ca, mountPath: /ca, readOnly: true }
+      volumes:
+        - name: role-id
+          configMap: { name: opener-3-role-id }
+        - name: ca
+          configMap: { name: red-doors-ca }
+---
+# ── opener-4 — dynamic PostgreSQL credentials ────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opener-4
+  namespace: rd-doors
+  labels: { app.kubernetes.io/part-of: red-doors, app: opener, red-doors/door: "4" }
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"opener:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"opener\")].image"}]'
+spec:
+  replicas: 1
+  selector: { matchLabels: { red-doors/opener: "4" } }
+  template:
+    metadata:
+      labels: { app: opener, red-doors/opener: "4", red-doors/needs-db: "true", app.kubernetes.io/part-of: red-doors }
+      annotations: { openshift.io/required-scc: restricted-v2 }
+    spec:
+      serviceAccountName: opener-4
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: opener
+          image: image-registry.openshift-image-registry.svc:5000/rd-doors/opener:latest
+          env:
+            - { name: DOOR_ID, value: "4" }
+            - { name: SERVICE_ACCOUNT, value: opener-4 }
+            - { name: PGHOST, value: postgres.rd-data.svc }
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /health, port: 8080 }, periodSeconds: 10 }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] }, readOnlyRootFilesystem: true }
+          resources: { requests: { cpu: 10m, memory: 48Mi }, limits: { memory: 128Mi } }
+          volumeMounts:
+            - { name: vault-token, mountPath: /var/run/secrets/vault, readOnly: true }
+            - { name: ca, mountPath: /ca, readOnly: true }
+      volumes:
+        - name: vault-token
+          projected: { sources: [ { serviceAccountToken: { audience: vault, expirationSeconds: 600, path: token } } ] }
+        - name: ca
+          configMap: { name: red-doors-ca }
+---
+# ── opener-5 — PKI client certificate + TLS cert auth ────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opener-5
+  namespace: rd-doors
+  labels: { app.kubernetes.io/part-of: red-doors, app: opener, red-doors/door: "5" }
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"opener:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"opener\")].image"}]'
+spec:
+  replicas: 1
+  selector: { matchLabels: { red-doors/opener: "5" } }
+  template:
+    metadata:
+      labels: { app: opener, red-doors/opener: "5", app.kubernetes.io/part-of: red-doors }
+      annotations: { openshift.io/required-scc: restricted-v2 }
+    spec:
+      serviceAccountName: opener-5
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: opener
+          image: image-registry.openshift-image-registry.svc:5000/rd-doors/opener:latest
+          env:
+            - { name: DOOR_ID, value: "5" }
+            - { name: SERVICE_ACCOUNT, value: opener-5 }
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /health, port: 8080 }, periodSeconds: 10 }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] }, readOnlyRootFilesystem: true }
+          resources: { requests: { cpu: 10m, memory: 48Mi }, limits: { memory: 128Mi } }
+          volumeMounts:
+            - { name: vault-token, mountPath: /var/run/secrets/vault, readOnly: true }
+            - { name: ca, mountPath: /ca, readOnly: true }
+      volumes:
+        - name: vault-token
+          projected: { sources: [ { serviceAccountToken: { audience: vault, expirationSeconds: 600, path: token } } ] }
+        - name: ca
+          configMap: { name: red-doors-ca }
+---
+# ── opener-6 — Transit decrypt-only ─────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opener-6
+  namespace: rd-doors
+  labels: { app.kubernetes.io/part-of: red-doors, app: opener, red-doors/door: "6" }
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"opener:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"opener\")].image"}]'
+spec:
+  replicas: 1
+  selector: { matchLabels: { red-doors/opener: "6" } }
+  template:
+    metadata:
+      labels: { app: opener, red-doors/opener: "6", app.kubernetes.io/part-of: red-doors }
+      annotations: { openshift.io/required-scc: restricted-v2 }
+    spec:
+      serviceAccountName: opener-6
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: opener
+          image: image-registry.openshift-image-registry.svc:5000/rd-doors/opener:latest
+          env:
+            - { name: DOOR_ID, value: "6" }
+            - { name: SERVICE_ACCOUNT, value: opener-6 }
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /health, port: 8080 }, periodSeconds: 10 }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] }, readOnlyRootFilesystem: true }
+          resources: { requests: { cpu: 10m, memory: 48Mi }, limits: { memory: 128Mi } }
+          volumeMounts:
+            - { name: vault-token, mountPath: /var/run/secrets/vault, readOnly: true }
+            - { name: ca, mountPath: /ca, readOnly: true }
+      volumes:
+        - name: vault-token
+          projected: { sources: [ { serviceAccountToken: { audience: vault, expirationSeconds: 600, path: token } } ] }
+        - name: ca
+          configMap: { name: red-doors-ca }
+---
+# ── opener-7 — Vault Secrets Operator; no Vault anything in this pod ─────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opener-7
+  namespace: rd-doors
+  labels: { app.kubernetes.io/part-of: red-doors, app: opener, red-doors/door: "7" }
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"opener:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"opener\")].image"}]'
+spec:
+  replicas: 1
+  selector: { matchLabels: { red-doors/opener: "7" } }
+  template:
+    metadata:
+      labels: { app: opener, red-doors/opener: "7", red-doors/no-vault: "true", app.kubernetes.io/part-of: red-doors }
+      annotations: { openshift.io/required-scc: restricted-v2 }
+    spec:
+      serviceAccountName: opener-7
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: opener
+          image: image-registry.openshift-image-registry.svc:5000/rd-doors/opener:latest
+          env:
+            - { name: DOOR_ID, value: "7" }
+            - { name: SERVICE_ACCOUNT, value: opener-7 }
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /health, port: 8080 }, periodSeconds: 10 }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] }, readOnlyRootFilesystem: true }
+          resources: { requests: { cpu: 10m, memory: 48Mi }, limits: { memory: 128Mi } }
+          volumeMounts:
+            - { name: door-7, mountPath: /secrets/door-7, readOnly: true }
+      volumes:
+        - name: door-7
+          secret: { secretName: door-7-customer-db }
+---
+# ── opener-impostor — a real identity with no business behind any door ───────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opener-impostor
+  namespace: rd-doors
+  labels: { app.kubernetes.io/part-of: red-doors, app: opener, red-doors/door: impostor }
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"opener:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"opener\")].image"}]'
+spec:
+  replicas: 1
+  selector: { matchLabels: { red-doors/opener: impostor } }
+  template:
+    metadata:
+      labels: { app: opener, red-doors/opener: impostor, red-doors/needs-db: "true", app.kubernetes.io/part-of: red-doors }
+      annotations: { openshift.io/required-scc: restricted-v2 }
+    spec:
+      serviceAccountName: impostor
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: opener
+          image: image-registry.openshift-image-registry.svc:5000/rd-doors/opener:latest
+          env:
+            - { name: DOOR_ID, value: impostor }
+            - { name: SERVICE_ACCOUNT, value: impostor }
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /health, port: 8080 }, periodSeconds: 10 }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] }, readOnlyRootFilesystem: true }
+          resources: { requests: { cpu: 10m, memory: 48Mi }, limits: { memory: 128Mi } }
+          volumeMounts:
+            - { name: vault-token, mountPath: /var/run/secrets/vault, readOnly: true }
+            - { name: ca, mountPath: /ca, readOnly: true }
+            - { name: forged, mountPath: /forged, readOnly: true }
+      volumes:
+        - name: vault-token
+          projected: { sources: [ { serviceAccountToken: { audience: vault, expirationSeconds: 600, path: token } } ] }
+        - name: ca
+          configMap: { name: red-doors-ca }
+        - name: forged
+          secret: { secretName: impostor-forged-cert }
+---
+# ── Services: one per opener (the API calls http://opener-N.rd-doors.svc:8080/knock)
+apiVersion: v1
+kind: List
+items:
+  - { apiVersion: v1, kind: Service, metadata: { name: opener-1, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }, spec: { selector: { red-doors/opener: "1" }, ports: [{ name: http, port: 8080 }] } }
+  - { apiVersion: v1, kind: Service, metadata: { name: opener-3, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }, spec: { selector: { red-doors/opener: "3" }, ports: [{ name: http, port: 8080 }] } }
+  - { apiVersion: v1, kind: Service, metadata: { name: opener-4, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }, spec: { selector: { red-doors/opener: "4" }, ports: [{ name: http, port: 8080 }] } }
+  - { apiVersion: v1, kind: Service, metadata: { name: opener-5, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }, spec: { selector: { red-doors/opener: "5" }, ports: [{ name: http, port: 8080 }] } }
+  - { apiVersion: v1, kind: Service, metadata: { name: opener-6, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }, spec: { selector: { red-doors/opener: "6" }, ports: [{ name: http, port: 8080 }] } }
+  - { apiVersion: v1, kind: Service, metadata: { name: opener-7, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }, spec: { selector: { red-doors/opener: "7" }, ports: [{ name: http, port: 8080 }] } }
+  - { apiVersion: v1, kind: Service, metadata: { name: opener-impostor, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }, spec: { selector: { red-doors/opener: impostor }, ports: [{ name: http, port: 8080 }] } }
+---
+# ── NetworkPolicies ─────────────────────────────────────────────────────────
+# Only the API (rd-app, app=red-doors-api) may knock.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: openers-ingress-from-api, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  podSelector: { matchLabels: { app: opener } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: rd-app } }
+          podSelector: { matchLabels: { app: red-doors-api } }
+      ports: [{ protocol: TCP, port: 8080 }]
+---
+# Openers may reach Vault and DNS; opener-4 and the impostor also PostgreSQL;
+# opener-7 nothing but DNS (it never talks to Vault).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: openers-egress, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  podSelector: { matchLabels: { app: opener } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: openshift-dns } }
+      ports: [{ protocol: UDP, port: 5353 }, { protocol: TCP, port: 5353 }, { protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: openers-egress-vault, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  podSelector:
+    matchExpressions: [{ key: red-doors/no-vault, operator: DoesNotExist }]
+    matchLabels: { app: opener }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: rd-vault } }
+      ports: [{ protocol: TCP, port: 8200 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: openers-egress-postgres, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  podSelector: { matchLabels: { app: opener, red-doors/needs-db: "true" } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: rd-data } }
+      ports: [{ protocol: TCP, port: 5432 }]

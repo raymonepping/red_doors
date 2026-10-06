@@ -1,0 +1,10 @@
+{
+  "name": "red-doors-opener",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Red Doors door opener — one codebase, one identity per deployment (prompt 06)",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": { "start": "node src/server.js" },
+  "dependencies": { "pg": "^8.16.0" }
+}

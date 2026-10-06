@@ -39,5 +39,7 @@ spec:
     name: door-7-customer-db
     create: true
     labels: { app.kubernetes.io/part-of: red-doors, red-doors/door: "7" }
-  # rolloutRestartTargets (opener-7 Deployment) is added in prompt 06,
-  # once that Deployment exists.
+  # A rotation in Vault rolls opener-7 so it serves the new value (prompt 06).
+  rolloutRestartTargets:
+    - kind: Deployment
+      name: opener-7
