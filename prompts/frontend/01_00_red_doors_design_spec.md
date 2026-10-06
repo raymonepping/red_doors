@@ -95,3 +95,42 @@ sign-off before 01_01.
 ## Execution log
 
 Appended by each run: what was done, deviations and why, validation output.
+
+### Run 1 — 2026-10-06
+
+#### Done
+
+- UI scaffold `ui/` (Nuxt 4 SPA + Nitro BFF, Tailwind v4, Hanken Grotesk +
+  JetBrains Mono via fontsource, lucide). `app/assets/css/main.css` = the
+  skill's `vault-glass.css` verbatim + a Red Doors section (door material
+  tokens). `nuxt.config.ts` (`ssr:false`, `lang=en`, `color-scheme: light`,
+  security headers, runtime config for the BFF).
+- `ui/app/components/RedDoor.vue`: authored SVG panel door (lacquer
+  gradient, recessed panels, brass plate + lever, engraved method), states
+  closed/knocking/opening/open/refused/pending, sizes lg/md/sm, `room` slot,
+  `role="img"` + spoken state. Only door tokens and `--vg-*` tokens (0 hex
+  literals in the component).
+- `/_design` component sheet (only with `NUXT_PUBLIC_DESIGN_SHEET=true`),
+  `docs/frontend/DESIGN.md`, screenshots in `docs/screenshots/design/`.
+
+#### Deviations
+
+- **Sign-off gate**: the user asked to run all prompts through without
+  stopping; the sheet was reviewed in one batched round instead and the
+  screenshots are committed for later review.
+- First round found four defects, fixed in one pass: empty band under the
+  leaf (fixed frame aspect → content-sized), doors overlapping 200 px grid
+  columns, bolt overshooting the jamb, open-room text hidden by the swung
+  leaf (content moved to the latch side). Second round: the swung leaf's
+  perspective overhang touched captions → the component reserves
+  `0.14 × width` below itself.
+- `--rd-brass-ink` contrast measured at 5.3:1 on brass (the first comment
+  claimed 6.4); corrected.
+
+#### Validation output
+
+```text
+screenshots 1440×900 + 390×844 + reduced-motion → docs/screenshots/design/
+axe WCAG 2.1 A/AA on /_design → 1440 px: 0 violations · 390 px: 0 violations
+reduced motion → no swing/pulse; open = leaf fades to show the room; knocking = focus outline
+```
