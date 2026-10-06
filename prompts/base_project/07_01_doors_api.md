@@ -64,7 +64,7 @@ Kubernetes auth role `red-doors-api` (SA `red-doors-api`), policy `rd-api`:
 | `POST /doors/2/open` | human door: the BFF forwards the **user's Vault token** in `X-Vault-Token`; the API reads `doors/data/2-board-minutes` with it and returns Vault's answer. The token is never stored or logged |
 | `POST /doors/8/requests` | requester reads with their token → Vault returns `wrap_info` (control group). API stores **only** the accessor, requester entity, created/expiry; returns the wrapping token to the BFF, which keeps it in the requester's server-side session |
 | `GET /doors/8/requests` | role-aware list; status per accessor via `sys/control-group/request` using the caller's token (approvers see approvals + remaining) |
-| `POST /doors/8/requests/:accessor/approve` | `sys/control-group/authorize` with the **approver's** token; Vault enforces "not your own request" |
+| `POST /doors/8/requests/:accessor/approve` | `sys/control-group/authorize` with the **approver's** token. A requester's own authorization comes back `approved: false` (Sentinel EGP `door-8-two-different-people` ignores it) — surface it as "your own approval does not count", from Vault's response + the authorization list, not as an API error. Vault enforces "not your own request" |
 | `POST /doors/8/requests/:accessor/open` | requester's BFF supplies the wrapping token → `sys/wrapping/unwrap` → launch codes, once |
 | `GET /attempts/:id` | one attempt: triggered-by, opened-by, outcome, Vault decision fields, joined **audit entries** (request + response) |
 | `GET /audit?door=&limit=` | recent audit entries tagged to doors |

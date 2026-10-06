@@ -1,0 +1,15 @@
+import "controlgroup"
+
+# Door 8 — the launch codes need two DIFFERENT people.
+#
+# The control-group factor in policy door-8-request counts "one member of
+# approvers". Eve is in both requesters and approvers, so without this EGP she
+# could approve her own request (found live in prompt 04). This endpoint-
+# governing policy makes a requester's own authorization worthless: once a
+# request carries control-group authorizations, at least one must come from
+# an entity other than the requester. Enforced by Vault — not the UI.
+authz = controlgroup.authorizations else []
+requester = identity.entity.id else ""
+others = filter authz as a { a.entity.id is not requester }
+
+main = rule { length(authz) is 0 or length(others) > 0 }

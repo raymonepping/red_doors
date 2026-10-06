@@ -148,8 +148,11 @@ Before writing code, read these and list what you reuse and what you change:
 4. **`token_policies` round-trip hazard**: never write back the output of
    `vault read -field=token_policies`; always specify the full list.
 5. **Architecture**: CRC is arm64 with no emulation. Every image must have
-   an arm64 manifest — check before choosing it (`osixia/openldap`, used in
-   Arcanium, is **amd64-only**; pick an arm64-capable OpenLDAP).
+   an arm64 manifest — check before choosing it
+   (`oc image info --show-multiarch <image>`). Corrected in prompt 04:
+   `osixia/openldap:1.5.0` *does* ship arm64 (the original note said
+   amd64-only), but it runs as root; Red Doors builds OpenLDAP from Alpine
+   instead so it runs under `restricted-v2`.
 6. **OpenShift SCC `restricted-v2`** runs containers as a random UID.
    Choose/configure images that tolerate it; don't reach for `anyuid`
    unless documented and justified per workload.
@@ -168,6 +171,12 @@ Before writing code, read these and list what you reuse and what you change:
     (found in prompt 02) — it doesn't wait. Main pods carry a
     `wait-for-seal-vault` init container; any new Vault workload that depends
     on another service at startup needs the same explicit wait.
+12. **A control group alone does not stop self-approval** (found in prompt
+    04): the factor counts "one member of `approvers`", and a requester who is
+    also an approver satisfies it herself. Red Doors adds a Sentinel EGP on the
+    launch-codes path that ignores the requester's own authorization. Vault
+    then answers her self-authorize with `approved: false` (not an error) and
+    refuses her unwrap until a *different* approver signs.
 
 ---
 
@@ -178,7 +187,9 @@ Before writing code, read these and list what you reuse and what you change:
   panel.
 - **Short-lived authority**: tokens, DB creds, certs and wrapped responses
   have TTLs measured in minutes; the UI shows countdowns.
-- **Separation of duties**: door 8's approver cannot be the requester
+- **Separation of duties**: door 8's approver cannot be the requester —
+  enforced by Vault (control-group factor **plus** the Sentinel EGP
+  `door-8-two-different-people`, see lesson 12), never by the UI
   (enforced by Vault control-group factors, not by the UI).
 - **Idempotent operations**: `make up` can be rerun at any time and brings
   the estate to the desired state without losing data.

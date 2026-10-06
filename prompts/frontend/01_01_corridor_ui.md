@@ -68,7 +68,9 @@ the audit entry — all real.
 5. **Approvals (door 8)** — requesters: "Request launch codes", their
    pending requests (approvals x/1, expiry countdown) and **Open** once
    approved. Approvers: inbox with requester, time left, **Approve**. Eve's
-   self-approval attempt shows Vault's refusal. Auditors: read-only.
+   self-approval attempt shows what Vault did: her authorization recorded
+   but not counted (`approved: false`, Sentinel EGP), her Open still
+   refused until Dirk approves. Auditors: read-only.
 6. **Audit** — recent entries, filter by door, raw JSON; banner when the
    collector is offline.
 7. **Cluster** — the seal chain as a diagram (seal Vault → Transit →

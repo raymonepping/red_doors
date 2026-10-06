@@ -1,0 +1,126 @@
+# Identity stack (prompt 04): OpenLDAP (built in-cluster) + Keycloak, namespace rd-identity.
+# Secrets ldap-admin / keycloak-admin are created by scripts/identity.sh from
+# .secrets/identity/ — never stored here.
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata: { name: rd-openldap, namespace: rd-identity, labels: { app.kubernetes.io/part-of: red-doors } }
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata: { name: rd-openldap, namespace: rd-identity, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  source: { type: Binary }
+  strategy: { type: Docker, dockerStrategy: {} }
+  output: { to: { kind: ImageStreamTag, name: "rd-openldap:latest" } }
+  resources: { limits: { memory: 512Mi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: openldap-data, namespace: rd-identity, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 256Mi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openldap
+  namespace: rd-identity
+  labels: { app.kubernetes.io/part-of: red-doors, app: openldap }
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"rd-openldap:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"openldap\")].image"}]'
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: openldap } }
+  template:
+    metadata:
+      labels: { app: openldap, app.kubernetes.io/part-of: red-doors }
+      annotations: { openshift.io/required-scc: restricted-v2 }
+    spec:
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: openldap
+          image: image-registry.openshift-image-registry.svc:5000/rd-identity/rd-openldap:latest
+          ports: [{ name: ldap, containerPort: 1389 }]
+          env:
+            - name: LDAP_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: ldap-admin, key: password } }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } }
+          readinessProbe: { tcpSocket: { port: 1389 }, periodSeconds: 5 }
+          resources: { requests: { cpu: 25m, memory: 32Mi }, limits: { memory: 128Mi } }
+          volumeMounts: [{ name: data, mountPath: /var/lib/openldap/data }]
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: openldap-data }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: openldap, namespace: rd-identity, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  selector: { app: openldap }
+  ports: [{ name: ldap, port: 389, targetPort: 1389 }]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: keycloak-data, namespace: rd-identity, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 512Mi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: rd-identity
+  labels: { app.kubernetes.io/part-of: red-doors, app: keycloak }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: keycloak } }
+  template:
+    metadata:
+      labels: { app: keycloak, app.kubernetes.io/part-of: red-doors }
+      annotations: { openshift.io/required-scc: restricted-v2 }
+    spec:
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: keycloak
+          # multi-arch (amd64/arm64); same version as Arcanium
+          image: quay.io/keycloak/keycloak:26.6.4
+          # Production mode on an embedded file DB (dev-file) on a PVC: one
+          # replica, demo-grade; TLS ends at the Route (edge), so HTTP inside.
+          args: ["start", "--db=dev-file", "--http-enabled=true", "--proxy-headers=xforwarded",
+                 "--hostname=https://keycloak.apps-crc.testing", "--health-enabled=true"]
+          env:
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: admin
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: keycloak-admin, key: password } }
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: management, containerPort: 9000 }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } }
+          readinessProbe: { httpGet: { path: /health/ready, port: 9000 }, periodSeconds: 10, failureThreshold: 30 }
+          resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { memory: 1Gi } }
+          volumeMounts: [{ name: data, mountPath: /opt/keycloak/data }]
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: keycloak-data }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: keycloak, namespace: rd-identity, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  selector: { app: keycloak }
+  ports: [{ name: http, port: 8080, targetPort: 8080 }]
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata: { name: keycloak, namespace: rd-identity, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  host: keycloak.apps-crc.testing
+  to: { kind: Service, name: keycloak }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }

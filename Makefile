@@ -78,3 +78,12 @@ seed: ## Write the business items behind the doors (only if absent — never cha
 	@./scripts/seed-doors.sh
 
 tf-all: tf-bootstrap tf-audit tf-doors seed ## All of the above, in order
+
+# ── Identity: OpenLDAP + Keycloak + Vault OIDC (prompt 04) ──────────────────
+.PHONY: identity-up demo-users
+
+identity-up: ## OpenLDAP (built in-cluster) + Keycloak + realm/federation/client + Vault OIDC & groups (idempotent)
+	@./scripts/identity.sh up
+
+demo-users: ## Print the demo users, their groups and passwords (presenter aid)
+	@./scripts/identity.sh users

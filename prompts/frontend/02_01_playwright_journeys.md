@@ -19,7 +19,7 @@ Nothing is mocked: the journeys drive real Vault decisions.
   and at least one joined audit entry) and the wrong key is denied (assert
   Vault's error text is shown and the door state is `refused`).
 - `door8.spec.ts`: two browser contexts — `cleo` requests, `dirk` approves,
-  `cleo` opens; `eve` self-approval refused; `finn` has no approve button
+  `cleo` opens; `eve` self-approves → still pending (`approved: false`) and her Open is refused, then `dirk` approves → she can open; `finn` has no approve button
   and a direct API call is refused by Vault.
 - `corridor.spec.ts`: keyboard walk (`→`, `K`, `W`, `D`), progress state.
 - `cluster.spec.ts`: 3 nodes, one leader, seal chain visible; optional

@@ -5,6 +5,12 @@
 # (.secrets/kube/config) — never ~/.kube/config, whose current context may
 # point at some other local cluster.
 
+# macOS ships bash 3.2; these scripts use bash 4+ features (associative arrays).
+if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+  echo "[red-doors] ERROR: bash >= 4 required (found $BASH_VERSION) — brew install bash" >&2
+  exit 1
+fi
+
 ROOT=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 export ROOT
 export KUBECONFIG="$ROOT/.secrets/kube/config"

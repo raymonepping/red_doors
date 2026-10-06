@@ -96,8 +96,11 @@ run, never committed; `make demo-users` prints them for the presenter.
   `sys/control-group/authorize`, `update` on `sys/control-group/request`.
 - Verify Vault (not the UI) enforces: `cleo` reads → wrapping token +
   accessor; `dirk` authorizes → `cleo` unwraps → launch codes. `eve`
-  requests and tries to approve her own request → Vault refuses
-  (requester cannot satisfy her own factor). `finn` cannot request or
+  requests and tries to approve her own request → Vault does not count it
+  (`approved: false`) and refuses her unwrap until a different approver signs.
+  Enforced by the Sentinel EGP `door-8-two-different-people` (see the
+  execution log: the control-group factor alone allowed self-approval).
+  `finn` cannot request or
   approve.
 
 ## Validation
@@ -118,3 +121,78 @@ CLI/UI.
 ## Execution log
 
 Appended by each run: what was done, deviations and why, validation output.
+
+### Run 1 — 2026-10-06
+
+#### Done
+
+- **OpenLDAP built in-cluster** (`deploy/identity/openldap/`: Alpine 3.22
+  OpenLDAP, slapd on :1389 as the OpenShift-assigned UID, `{SSHA}`
+  passwords, mdb on a PVC) via BuildConfig `rd-openldap` → ImageStream; the
+  first real use of the in-cluster build pipeline (rebuilds only when the
+  source hash changes).
+- **Keycloak 26.6.4** (multi-arch), `start` on dev-file storage (PVC), Route
+  `keycloak.apps-crc.testing` (edge), readiness on `:9000/health/ready`.
+  Both Deployments pinned `openshift.io/required-scc: restricted-v2` with a
+  hardened securityContext.
+- `scripts/identity.sh up|users` (`make identity-up`, `make demo-users`):
+  secrets generated once into `.secrets/identity/`; LDAP seeded as desired
+  state (6 users, 5 groups, memberships replaced, passwords via password
+  modify); Keycloak reconciled with kcadm (realm `red-doors`, read-only LDAP
+  federation, group mapper + sync, client `vault` with secret, 3 redirect
+  URIs, `groups` claim mapper).
+- `terraform/vault-identity` (namespace `red-doors`): OIDC auth `oidc/`
+  against Keycloak (discovery CA = CRC ingress CA), role `visitor`
+  (`groups_claim=groups`), external groups `board`, `requesters`,
+  `approvers`, `auditors` with aliases, policies `door-visitor`, `door-2`,
+  `door-8-request` (control group), `door-8-approve`, `auditor`, and the
+  Sentinel EGP `door-8-two-different-people`.
+- `scripts/oidc-login.sh <user>` — headless sign-in through the real chain
+  (Vault auth_url → Keycloak form → LDAP password → Vault callback); used by
+  every later test.
+
+#### Deviations
+
+- **OpenLDAP image built from Alpine** instead of a pulled image:
+  `osixia/openldap` *does* have arm64 (master prompt lesson 5 corrected) but
+  runs as root; Bitnami's free images are frozen (`bitnamilegacy`).
+- **Self-approval: the prompt's assumption was wrong.** With only the
+  control-group factor, `eve` (requesters + approvers) authorized her own
+  request (`approved: true`, requester entity = approver entity) and unwrapped
+  the launch codes. Fixed in Vault, not the UI: Sentinel EGP
+  `door-8-two-different-people` (hard-mandatory on
+  `doors/data/8-launch-codes`, `import "controlgroup"`) requires at least one
+  authorization from an entity other than the requester. Vault now returns
+  `approved: false` to her self-authorize and refuses her unwrap; after a
+  different approver signs, she can open. First EGP draft lacked
+  `import "controlgroup"` and denied every request until fixed (minutes).
+- **In-cluster DNS needed no fix**: Vault resolved
+  `keycloak.apps-crc.testing` and validated discovery with the ingress CA on
+  first apply.
+- Vault CLI redirect URI `http://localhost:8250/oidc/callback` added (for
+  `vault login -method=oidc` and the headless test helper).
+- The OIDC client secret lives in `vault-identity` state (sensitive,
+  `.secrets/terraform/`, 0600); business values still never touch state.
+- Scripts now refuse to run on bash < 4 (macOS `/bin/bash` is 3.2).
+
+#### Validation output
+
+```text
+make identity-up (first)  → image built, LDAP 6 users/5 groups, realm + federation + mapper + client, vault-identity 15 added
+make identity-up (rerun)  → image up to date, 0 added/changed/destroyed, no recreation
+logins via real OIDC chain → ada:[door-2] ben:[] cleo:[door-8-request] dirk:[door-8-approve]
+                             eve:[door-8-approve, door-8-request] finn:[auditor]
+door 2  ada reads board minutes ...................... OK
+        ben reads board minutes ...................... 403
+        ben reads lobby notice ....................... OK (signed in, not authorized)
+door 8  cleo requests → wrapped, pending (ttl 600s) .. OK
+        cleo unwraps before approval ................. 400 "Request needs further approval"
+        finn / ben authorize ......................... denied
+        dirk inspects → approved:false, requester entity shown; dirk authorizes → approved:true
+        cleo unwraps → launch codes .................. OK; second unwrap → 400 not valid
+        dirk reads codes directly .................... 403
+        eve requests; eve self-authorizes ............ approved:false (EGP)
+        eve unwraps ................................... refused
+        dirk approves; eve unwraps .................... OK
+RESULT: 17 passed, 0 failed
+```
