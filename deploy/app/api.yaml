@@ -1,0 +1,127 @@
+# Red Doors API (prompt 07), namespace rd-app. Internal only — no Route.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: red-doors-api, namespace: rd-app, labels: { app.kubernetes.io/part-of: red-doors } }
+# automount stays on: the API reads pod/VSO status from the Kubernetes API
+# (RBAC below). Its Vault identity uses a separate projected token (audience vault).
+---
+# Read-only cluster view: pods in the Vault namespaces and rd-doors, the
+# door-7 VaultStaticSecret status. No access to Secrets anywhere.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: red-doors-api-view, namespace: rd-vault, labels: { app.kubernetes.io/part-of: red-doors } }
+rules: [{ apiGroups: [""], resources: [pods], verbs: [get, list] }]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: red-doors-api-view, namespace: rd-vault, labels: { app.kubernetes.io/part-of: red-doors } }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: red-doors-api-view }
+subjects: [{ kind: ServiceAccount, name: red-doors-api, namespace: rd-app }]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: red-doors-api-view, namespace: rd-vault-seal, labels: { app.kubernetes.io/part-of: red-doors } }
+rules: [{ apiGroups: [""], resources: [pods], verbs: [get, list] }]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: red-doors-api-view, namespace: rd-vault-seal, labels: { app.kubernetes.io/part-of: red-doors } }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: red-doors-api-view }
+subjects: [{ kind: ServiceAccount, name: red-doors-api, namespace: rd-app }]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: red-doors-api-view, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }
+rules:
+  - { apiGroups: [""], resources: [pods], verbs: [get, list] }
+  - { apiGroups: [secrets.hashicorp.com], resources: [vaultstaticsecrets], resourceNames: [door-7-customer-db], verbs: [get] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: red-doors-api-view, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: red-doors-api-view }
+subjects: [{ kind: ServiceAccount, name: red-doors-api, namespace: rd-app }]
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata: { name: red-doors-api, namespace: rd-app, labels: { app.kubernetes.io/part-of: red-doors } }
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata: { name: red-doors-api, namespace: rd-app, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  source: { type: Binary }
+  strategy: { type: Docker, dockerStrategy: {} }
+  output: { to: { kind: ImageStreamTag, name: "red-doors-api:latest" } }
+  resources: { limits: { memory: 1Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: red-doors-api
+  namespace: rd-app
+  labels: { app.kubernetes.io/part-of: red-doors, app: red-doors-api }
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"red-doors-api:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"api\")].image"}]'
+spec:
+  replicas: 1
+  # one collector, one door-3 replay memory: keep it to a single replica
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: red-doors-api } }
+  template:
+    metadata:
+      labels: { app: red-doors-api, app.kubernetes.io/part-of: red-doors }
+      annotations: { openshift.io/required-scc: restricted-v2 }
+    spec:
+      serviceAccountName: red-doors-api
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: api
+          image: image-registry.openshift-image-registry.svc:5000/rd-app/red-doors-api:latest
+          env:
+            - { name: VAULT_ADDR, value: "https://vault-active.rd-vault.svc:8200" }
+            - { name: VAULT_NAMESPACE, value: red-doors }
+            - { name: PGHOST, value: postgres.rd-data.svc }
+          ports:
+            - { name: http, containerPort: 3001 }
+            - { name: audit, containerPort: 9090 }
+          readinessProbe: { httpGet: { path: /api/v1/health, port: 3001 }, periodSeconds: 10 }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] }, readOnlyRootFilesystem: true }
+          resources: { requests: { cpu: 50m, memory: 96Mi }, limits: { memory: 256Mi } }
+          volumeMounts:
+            - { name: vault-token, mountPath: /var/run/secrets/vault, readOnly: true }
+            - { name: ca, mountPath: /ca, readOnly: true }
+      volumes:
+        - name: vault-token
+          projected: { sources: [ { serviceAccountToken: { audience: vault, expirationSeconds: 3600, path: token } } ] }
+        - name: ca
+          configMap: { name: red-doors-ca }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: red-doors-api, namespace: rd-app, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  selector: { app: red-doors-api }
+  ports: [{ name: http, port: 3001 }]
+---
+# Vault's socket audit device connects here.
+apiVersion: v1
+kind: Service
+metadata: { name: red-doors-api-audit, namespace: rd-app, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  selector: { app: red-doors-api }
+  ports: [{ name: audit, port: 9090 }]
+---
+# Only the UI's server side may call the API; only Vault may reach the collector.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: red-doors-api-ingress, namespace: rd-app, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  podSelector: { matchLabels: { app: red-doors-api } }
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: red-doors-ui } } }]
+      ports: [{ protocol: TCP, port: 3001 }]
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: rd-vault } } }]
+      ports: [{ protocol: TCP, port: 9090 }]

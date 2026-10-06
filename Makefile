@@ -65,8 +65,8 @@ tf-bootstrap: ## Root, once: namespace red-doors + policy rd-admin, then a perio
 vault-admin-token: ## Ensure .secrets/vault/admin-token is valid (re-issue if missing/expiring)
 	@./scripts/vault-admin.sh token
 
-tf-audit: ## Audit devices (stdout file device adopted into state; socket device in prompt 07)
-	@./scripts/tf.sh vault-audit
+tf-audit: ## Audit devices: stdout always; socket → API collector once the API runs (prompt 07)
+	@./scripts/audit.sh
 
 door-identities: ## Service accounts in rd-doors that Vault's Kubernetes auth roles bind to
 	@source scripts/lib.sh && require_kubeconfig && oc apply -f deploy/doors/serviceaccounts.yaml
@@ -114,3 +114,15 @@ knock: ## Knock on a machine door as its owner: make knock DOOR=4
 
 knock-wrong: ## Same door, the impostor's identity: make knock-wrong DOOR=4
 	@./scripts/doors.sh knock-wrong $(DOOR)
+
+# ── API (prompt 07) ─────────────────────────────────────────────────────────
+.PHONY: api-up api-test api-smoke
+
+api-up: ## Vault identity rd-api, build (in-cluster, on change), deploy, then the socket audit device
+	@./scripts/api.sh up
+
+api-test: ## Unit tests (synthetic audit fixtures) — no cluster needed
+	@cd api && npm test
+
+api-smoke: ## Live smoke test of every endpoint through the real cluster
+	@./scripts/api-smoke.sh

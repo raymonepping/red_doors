@@ -1,0 +1,364 @@
+openapi: 3.1.0
+info:
+  title: Red Doors API
+  version: 1.0.0
+  description: |
+    Internal API of Red Doors (Vault Enterprise on OpenShift). Called only by
+    the UI's server side (BFF): no Route, NetworkPolicy-restricted.
+
+    * `X-Triggered-By` — the signed-in person who pressed the button (set by the BFF).
+    * `X-Vault-Token` — for human doors (2, 8): the signed-in person's own Vault
+      token from the BFF session. Used per request, never stored or logged.
+
+    A door Vault refuses is a successful demo: `outcome: denied` with Vault's own
+    status and errors, HTTP 200. HTTP errors are reserved for the API itself.
+    Released door values are returned once and never persisted.
+servers:
+  - url: http://red-doors-api.rd-app.svc:3001
+# No API-level credential: only the UI's server side can reach this API
+# (NetworkPolicy), and every door decision is Vault's. Human-door operations
+# carry the person's Vault token (security scheme vaultToken).
+security: []
+paths:
+  /api/v1/health:
+    get:
+      operationId: getHealth
+      summary: API health — its own Vault identity, Vault-minted DB login, audit collector
+      responses:
+        '200': { description: Health, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+  /api/v1/whoami:
+    get:
+      operationId: whoAmI
+      summary: The signed-in person, as Vault sees them
+      security: [{ vaultToken: [] }]
+      responses:
+        '200': { description: Identity, content: { application/json: { schema: { $ref: '#/components/schemas/WhoAmI' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+  /api/v1/doors:
+    get:
+      operationId: listDoors
+      summary: The eight doors in corridor (story) order, with each door's last attempt
+      responses:
+        '200':
+          description: Doors
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [doors]
+                properties: { doors: { type: array, items: { $ref: '#/components/schemas/Door' } } }
+  /api/v1/doors/{id}:
+    get:
+      operationId: getDoor
+      summary: One door — policy texts (and EGP) read live from Vault, recent attempts
+      parameters: [{ $ref: '#/components/parameters/DoorId' }]
+      responses:
+        '200': { description: Door detail, content: { application/json: { schema: { $ref: '#/components/schemas/DoorDetail' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/doors/{id}/knock:
+    post:
+      operationId: knock
+      summary: Knock on a machine door (1, 3, 4, 5, 6, 7) as its owner or as the impostor
+      parameters: [{ $ref: '#/components/parameters/DoorId' }, { $ref: '#/components/parameters/TriggeredBy' }]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { as: { type: string, enum: [owner, impostor], default: owner } } }
+      responses:
+        '200': { description: Knock result (opened or denied), content: { application/json: { schema: { $ref: '#/components/schemas/KnockResult' } } } }
+        '409': { $ref: '#/components/responses/Error' }
+        '502': { $ref: '#/components/responses/Error' }
+  /api/v1/doors/2/open:
+    post:
+      operationId: openDoor2
+      summary: Door 2 — read the board minutes with the person's own token
+      security: [{ vaultToken: [] }]
+      responses:
+        '200': { description: Opened or denied, content: { application/json: { schema: { $ref: '#/components/schemas/KnockResult' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+  /api/v1/doors/8/requests:
+    post:
+      operationId: requestLaunchCodes
+      summary: Door 8 — request the launch codes (control group → pending)
+      description: Returns the wrapping token ONCE, for the requester's server-side session. Only the accessor is stored.
+      security: [{ vaultToken: [] }]
+      responses:
+        '201': { description: Pending, content: { application/json: { schema: { $ref: '#/components/schemas/Door8Request' } } } }
+        '200': { description: Denied (not a requester), content: { application/json: { schema: { $ref: '#/components/schemas/KnockResult' } } } }
+    get:
+      operationId: listDoor8Requests
+      summary: Door 8 — requests visible to this person (approvers see all, requesters their own)
+      security: [{ vaultToken: [] }]
+      responses:
+        '200': { description: Requests, content: { application/json: { schema: { $ref: '#/components/schemas/Door8List' } } } }
+  /api/v1/doors/8/requests/{accessor}/approve:
+    post:
+      operationId: approveDoor8Request
+      summary: Door 8 — authorize with the approver's own token
+      description: A requester's own authorization comes back `approved:false`, `outcome:not_counted` (Sentinel EGP door-8-two-different-people).
+      security: [{ vaultToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/Accessor' }]
+      responses:
+        '200': { description: Approval result, content: { application/json: { schema: { $ref: '#/components/schemas/Door8Approval' } } } }
+  /api/v1/doors/8/requests/{accessor}/open:
+    post:
+      operationId: openDoor8Request
+      summary: Door 8 — the requester unwraps once approved
+      security: [{ vaultToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/Accessor' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [wrapping_token], properties: { wrapping_token: { type: string } } } } }
+      responses:
+        '200': { description: Opened or denied, content: { application/json: { schema: { $ref: '#/components/schemas/KnockResult' } } } }
+  /api/v1/attempts:
+    get:
+      operationId: listAttempts
+      summary: Recent attempts (decisions only — never released values)
+      parameters:
+        - { name: door, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 100 } }
+      responses:
+        '200': { description: Attempts, content: { application/json: { schema: { type: object, properties: { attempts: { type: array, items: { $ref: '#/components/schemas/Attempt' } } } } } } }
+  /api/v1/attempts/{id}:
+    get:
+      operationId: getAttempt
+      summary: One attempt with its Vault audit entries (joined by request id)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200': { description: Attempt, content: { application/json: { schema: { $ref: '#/components/schemas/AttemptDetail' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/audit:
+    get:
+      operationId: listAudit
+      summary: Recent Vault audit entries received by the collector
+      parameters:
+        - { name: door, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 200 } }
+      responses:
+        '200': { description: Entries, content: { application/json: { schema: { $ref: '#/components/schemas/AuditFeed' } } } }
+  /api/v1/audit/{id}:
+    get:
+      operationId: getAuditEntry
+      summary: One raw audit record (HMAC'd fields stay HMAC'd)
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        '200': { description: Entry, content: { application/json: { schema: { $ref: '#/components/schemas/AuditEntry' } } } }
+  /api/v1/cluster:
+    get:
+      operationId: getCluster
+      summary: Vault nodes (unauthenticated sys/health + sys/leader), seal chain, pods, VSO status
+      responses:
+        '200': { description: Cluster, content: { application/json: { schema: { $ref: '#/components/schemas/Cluster' } } } }
+  /api/v1/policies/{name}:
+    get:
+      operationId: getPolicy
+      summary: An ACL policy's text, read live from Vault
+      parameters: [{ name: name, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Policy, content: { application/json: { schema: { type: object, properties: { name: { type: string }, text: { type: string } } } } } }
+        '404': { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    vaultToken:
+      type: apiKey
+      in: header
+      name: X-Vault-Token
+      description: "The signed-in person's Vault token from the BFF session (human doors only)"
+  parameters:
+    DoorId: { name: id, in: path, required: true, schema: { type: integer, minimum: 1, maximum: 8 } }
+    Accessor: { name: accessor, in: path, required: true, schema: { type: string } }
+    TriggeredBy: { name: X-Triggered-By, in: header, required: false, schema: { type: string } }
+  responses:
+    Error:
+      description: API error
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error, code]
+            properties: { error: { type: string }, code: { type: string }, request_id: { type: [string, 'null'] } }
+  schemas:
+    Outcome: { type: string, enum: [opened, denied, pending, error, approved, not_counted, recorded] }
+    Denial:
+      type: [object, 'null']
+      properties:
+        step: { type: [string, 'null'], description: 'login | read | mint_db_login | issue_cert | decrypt | unwrap | wrap_lookup | authorize | …' }
+        status: { type: [integer, 'null'], description: "Vault's HTTP status (an expired client cert is 500)" }
+        path: { type: [string, 'null'] }
+        errors: { type: array, items: { type: string }, description: "Vault's own error text" }
+    Identity:
+      type: object
+      properties:
+        method: { type: string, examples: [kubernetes, approle, cert, oidc, vault-secrets-operator] }
+        subject: { type: string }
+        role: { type: [string, 'null'] }
+        groups: { type: array, items: { type: string } }
+    VaultDecision:
+      type: object
+      properties:
+        request_ids: { type: array, items: { type: string } }
+        token_accessor: { type: [string, 'null'] }
+        policies: { type: array, items: { type: string } }
+        identity_policies: { type: array, items: { type: string } }
+        token_ttl: { type: [integer, 'null'] }
+        entity_id: { type: [string, 'null'] }
+        revoked_after_use: { type: boolean }
+    Door:
+      type: object
+      required: [id, story, kind, title, method]
+      properties:
+        id: { type: integer }
+        story: { type: integer }
+        kind: { type: string, enum: [machine, human, governance] }
+        title: { type: string }
+        method: { type: string }
+        summary: { type: string }
+        owner: { type: string }
+        wrong_key: { type: string }
+        policies: { type: array, items: { type: string } }
+        last_attempt: { type: [object, 'null'] }
+    DoorDetail:
+      allOf:
+        - { $ref: '#/components/schemas/Door' }
+        - type: object
+          properties:
+            policy_texts: { type: array, items: { type: object, properties: { name: { type: string }, text: { type: [string, 'null'] } } } }
+            egp: { type: array, items: { type: object, properties: { name: { type: string }, text: { type: [string, 'null'] }, paths: { type: array, items: { type: string } }, enforcement_level: { type: string } } } }
+            attempts: { type: array, items: { $ref: '#/components/schemas/Attempt' } }
+    KnockResult:
+      type: object
+      required: [door, outcome]
+      properties:
+        attempt_id: { type: string, format: uuid }
+        door: { type: integer }
+        as: { type: string }
+        triggered_by: { type: [string, 'null'] }
+        outcome: { $ref: '#/components/schemas/Outcome' }
+        identity: { $ref: '#/components/schemas/Identity' }
+        vault: { $ref: '#/components/schemas/VaultDecision' }
+        released: { type: [object, 'null'], description: 'The real value behind the door — shown once, never stored' }
+        denial: { $ref: '#/components/schemas/Denial' }
+        steps: { type: array, items: { type: object, properties: { step: { type: string }, ok: { type: boolean } } } }
+        certificate: { type: [object, 'null'] }
+        wrapping: { type: [object, 'null'] }
+        encrypt_attempt: { type: [object, 'null'] }
+        orchestration: { type: object }
+        timings_ms: { type: object, additionalProperties: { type: integer } }
+    Door8Request:
+      type: object
+      properties:
+        attempt_id: { type: string }
+        outcome: { const: pending }
+        accessor: { type: string }
+        wrapping_token: { type: string, description: 'Keep in the requester session; never send to the browser' }
+        expires_at: { type: string, format: date-time }
+    Door8List:
+      type: object
+      properties:
+        viewer: { type: object, properties: { username: { type: string }, approver: { type: boolean }, requester: { type: boolean } } }
+        requests:
+          type: array
+          items:
+            type: object
+            properties:
+              accessor: { type: string }
+              requester_name: { type: string }
+              created_at: { type: string, format: date-time }
+              expires_at: { type: string, format: date-time }
+              opened_at: { type: [string, 'null'], format: date-time }
+              mine: { type: boolean }
+              expired: { type: boolean }
+              self_approval_present: { type: boolean }
+              vault: { type: object }
+    Door8Approval:
+      type: object
+      properties:
+        attempt_id: { type: string }
+        outcome: { $ref: '#/components/schemas/Outcome' }
+        approved: { type: boolean }
+        self_approval: { type: boolean }
+        explanation: { type: string }
+        denial: { $ref: '#/components/schemas/Denial' }
+    Attempt:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        door: { type: integer }
+        mode: { type: string, enum: [owner, impostor, human, request, approve, open] }
+        triggered_by: { type: [string, 'null'] }
+        opened_by: { $ref: '#/components/schemas/Identity' }
+        outcome: { $ref: '#/components/schemas/Outcome' }
+        denial: { $ref: '#/components/schemas/Denial' }
+    AttemptDetail:
+      allOf:
+        - { $ref: '#/components/schemas/Attempt' }
+        - type: object
+          properties:
+            decision: { type: object }
+            request_ids: { type: array, items: { type: string } }
+            audit: { type: array, items: { $ref: '#/components/schemas/AuditEntry' } }
+    AuditEntry:
+      type: object
+      properties:
+        id: { type: integer }
+        time: { type: string, format: date-time }
+        type: { type: string, enum: [request, response] }
+        request_id: { type: string }
+        operation: { type: string }
+        path: { type: string }
+        namespace: { type: string }
+        display_name: { type: [string, 'null'] }
+        policies: { type: [array, 'null'], items: { type: string } }
+        error: { type: [string, 'null'] }
+        door: { type: [integer, 'null'] }
+        raw: { type: object, description: "Vault's record as sent — HMAC'd fields stay HMAC'd" }
+    AuditFeed:
+      type: object
+      properties:
+        collector: { $ref: '#/components/schemas/Collector' }
+        entries: { type: array, items: { $ref: '#/components/schemas/AuditEntry' } }
+    Collector:
+      type: object
+      properties:
+        listening: { type: boolean }
+        connections: { type: integer }
+        received: { type: integer }
+        stored: { type: integer }
+        dropped: { type: integer }
+        last_entry_at: { type: [string, 'null'], format: date-time }
+    Health:
+      type: object
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        vault: { type: object }
+        database: { type: object }
+        audit_collector: { $ref: '#/components/schemas/Collector' }
+    WhoAmI:
+      type: object
+      properties:
+        display_name: { type: string }
+        username: { type: string }
+        entity_id: { type: [string, 'null'] }
+        policies: { type: array, items: { type: string } }
+        identity_policies: { type: array, items: { type: string } }
+        groups: { type: array, items: { type: string } }
+        ttl: { type: integer }
+    Cluster:
+      type: object
+      properties:
+        observed_at: { type: string, format: date-time }
+        seal_chain: { type: object }
+        vault:
+          type: object
+          properties:
+            leader: { type: [string, 'null'] }
+            unsealed: { type: integer }
+            total: { type: integer }
+            license_expiry: { type: [string, 'null'] }
+            nodes: { type: array, items: { type: object } }
+            pods: {}
+        openers: {}
+        vso_door_7: { type: object }
+        audit_collector: { $ref: '#/components/schemas/Collector' }

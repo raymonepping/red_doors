@@ -53,3 +53,18 @@ resource "vault_audit" "stdout" {
     file_path = "stdout"
   }
 }
+
+# Streams every audit record to the Red Doors API's collector (prompt 07).
+# Two devices on purpose: Vault blocks a request only if EVERY device fails,
+# so stdout keeps Vault serving while the collector restarts.
+resource "vault_audit" "collector" {
+  count = var.audit_socket_address == "" ? 0 : 1
+  path  = "red-doors-collector"
+  type  = "socket"
+  options = {
+    address       = var.audit_socket_address
+    socket_type   = "tcp"
+    format        = "json"
+    write_timeout = "2s"
+  }
+}

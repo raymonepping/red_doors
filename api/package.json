@@ -1,0 +1,16 @@
+{
+  "name": "red-doors-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Red Doors API — knock orchestration, door 8 two-person workflow, Vault audit collector (prompt 07)",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.16.0"
+  }
+}

@@ -120,3 +120,68 @@ UI and BFF (frontend prompts).
 ## Execution log
 
 Appended by each run: what was done, deviations and why, validation output.
+
+### Run 1 — 2026-10-06
+
+#### Done
+
+- `api/` (Node 24 ESM, Express 5.2, `pg`): `vault.js` (own identity via
+  Kubernetes role `red-doors-api`, renew at 2/3 TTL, re-login on 403;
+  `asUser` for people's tokens; response wrapping via `X-Vault-Wrap-TTL`),
+  `db.js` (credentials from `database/creds/api-rw`, re-minted at 2/3 of the
+  lease with a pool swap, pool `error` listener, `SET ROLE api_owner`,
+  idempotent migrations), `registry.js` (8 doors, story order, audit
+  paths), `audit.js` + `audit-parse.js` (TCP collector :9090, bounded queue,
+  batch inserts, retention), `cluster.js`, `server.js` (all endpoints).
+  Unit tests (`make api-test`, synthetic fixtures): 5/5.
+- `terraform/vault-api`: policy `rd-api` (door-3 secret-id **wrapped only**,
+  30s–2m; policy/EGP text; identity names; `database/creds/api-rw`),
+  Kubernetes role `red-doors-api`, database role `api-rw`.
+- `terraform/vault-audit`: socket device `red-doors-collector` (tcp,
+  `write_timeout=2s`) next to stdout; `scripts/audit.sh` declares it only
+  once the API is ready (a plain re-apply would otherwise remove it).
+- `deploy/app/api.yaml`: SA + read-only RBAC (pods; the door-7
+  VaultStaticSecret by name; no Secrets), BuildConfig/ImageStream,
+  Deployment (Recreate, 1 replica), Services `red-doors-api:3001` and
+  `red-doors-api-audit:9090`, NetworkPolicy (UI → 3001, rd-vault → 9090).
+- `openapi/red-doors.yaml` (OpenAPI 3.1, 16 operations with operationIds;
+  Redocly: valid). `scripts/api.sh` (`make api-up`, `api.sh call`),
+  `scripts/api-smoke.sh` (`make api-smoke`).
+
+#### Deviations
+
+- **Cluster view without root-namespace endpoints**: the API's token lives in
+  `red-doors`, so seal-token TTL and Raft configuration stay in
+  `make vault-status`. Per node it uses unauthenticated `sys/health` +
+  `sys/leader`, which also expose the licence expiry.
+- **Released values are never persisted**: attempts store identity,
+  decision, denial and request ids only.
+- **Group names**: `rd-api` may read `identity/entity/id/*` and
+  `identity/group/id/*` (names, no secrets) to show a person's groups.
+- **Door 3 impostor**: the API replays the last wrapping token opener-3
+  consumed (or mints one and lets opener-3 consume it first).
+- **Classification**: openers already map every Vault refusal (including
+  the HTTP 500 for an expired client cert) to `outcome: denied`; the API
+  passes it through as HTTP 200.
+- OpenAPI keeps 11 "add a 4xx" style warnings: refusals are 200 by design.
+
+#### Validation output
+
+```text
+make api-test   → 5 passed (synthetic audit fixtures, door tagging, registry)
+make api-up     → vault-api 3 added; image built in-cluster; ready (policies default,rd-api; db v-red-door-api-rw-…);
+                  vault-audit 1 added → audit devices: stdout + red-doors-collector (socket → API)
+make api-smoke  → 39 passed, 0 failed:
+  health ok, own identity rd-api, Vault-minted DB login; collector listening and receiving
+  8 doors in story order; policy text and the Sentinel EGP read live from Vault
+  doors 1,3,4,5,6,7: owner opened, impostor denied (door 7: no Secret mounted)
+  door 3 wrapped by the API (creation_path auth/approle/role/door-3/secret-id), never unwrapped by it
+  door 4 attempt joined to its Vault audit entries by request id; attempts hold no released values
+  door 2: ada opened, ben 403 · door 8: cleo → pending; open before approval refused; ben/finn
+  approve refused; dirk approves; cleo opens; eve self-approval → not_counted; eve open refused;
+  dirk approves; eve opens
+  cluster: 3/3 unsealed, leader, seal Vault unsealed, licence expiry, VSO status; audit feed door-tagged
+  rd-api capabilities on 7 door paths → all deny
+collector offline: API scaled to 0 → Vault served a read in 0.7 s (stdout device);
+                   API back → Vault reconnected the socket by itself, entries flowing again
+```
