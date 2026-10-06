@@ -18,6 +18,9 @@ if [ -z "${VAULT_TOKEN:-}" ]; then
   VAULT_TOKEN=$(cat "$ROOT/.secrets/vault/admin-token")
 fi
 export VAULT_TOKEN
+# Each module sets its Vault namespace explicitly. A VAULT_NAMESPACE exported
+# by the caller would be prefixed on top (found live: red-doors/red-doors → 403).
+unset VAULT_NAMESPACE
 mkdir -p "$ROOT/.secrets/terraform"
 
 log "terraform apply: $module"

@@ -87,3 +87,18 @@ identity-up: ## OpenLDAP (built in-cluster) + Keycloak + realm/federation/client
 
 demo-users: ## Print the demo users, their groups and passwords (presenter aid)
 	@./scripts/identity.sh users
+
+# ── Data + Vault Secrets Operator (prompt 05) ───────────────────────────────
+.PHONY: data-up vso-up door7-rotate door7-status
+
+data-up: ## PostgreSQL + schema + Vault database engine (door 4) + merger ciphertext (door 6)
+	@./scripts/data.sh up
+
+vso-up: ## Vault Secrets Operator from OperatorHub + door-7 VaultStaticSecret
+	@./scripts/vso.sh up
+
+door7-rotate: ## Write a new customer-DB password in Vault — watch VSO sync it into OpenShift
+	@./scripts/vso.sh rotate
+
+door7-status: ## VaultStaticSecret + synced Secret metadata (never the value)
+	@./scripts/vso.sh status

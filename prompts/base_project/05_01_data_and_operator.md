@@ -82,3 +82,64 @@ The opener code itself (prompt 06).
 ## Execution log
 
 Appended by each run: what was done, deviations and why, validation output.
+
+### Run 1 — 2026-10-06
+
+#### Done
+
+- PostgreSQL `registry.redhat.io/rhel9/postgresql-16` (arm64 in the
+  manifest list; pulled with the cluster pull secret), `restricted-v2`,
+  PVC, Service `postgres.rd-data.svc`. `deploy/data/schema.sql`
+  (idempotent): `payroll` (20 generated rows), `merger_docs` (CHECK
+  `ciphertext LIKE 'vault:v%'`), schema `api` owned by NOLOGIN `api_owner`,
+  role `vault_admin` (LOGIN CREATEROLE, SELECT on payroll WITH GRANT OPTION,
+  `pg_signal_backend`, `api_owner` WITH ADMIN OPTION — not superuser).
+- `terraform/vault-database`: `database/` mount, connection `reddoors`
+  (`verify_connection`), role `payroll-reader` (5 min / max 10 min,
+  revocation terminates sessions and drops the role).
+- `scripts/data.sh` (`make data-up`): secrets, deploy, schema, first-run
+  vault_admin password → Terraform → `database/rotate-root` once (marker
+  `.secrets/data/vault-admin.rotated`), door-6 ciphertext into
+  `merger_docs` (migrated from the prompt-03 ConfigMap, which is then
+  deleted; a fresh install encrypts a newly generated memo here).
+- VSO: `deploy/base/vso-subscription.yaml` (certified, `stable`,
+  v1.6.0), `deploy/doors/vso.yaml` (VaultConnection with CA Secret,
+  VaultAuth kubernetes/`vso-door-7`, VaultStaticSecret → Secret
+  `door-7-customer-db`, refresh 30s); `scripts/vso.sh`
+  (`make vso-up | door7-rotate | door7-status`).
+
+#### Deviations
+
+- **vault_admin's initial password is write-only** (`password_wo` +
+  `password_wo_version`, ephemeral variable, Terraform ≥ 1.11): never in
+  state, and a later apply can't push a stale password over the one Vault
+  rotated. Recovery after recreating the DB: delete the marker, rerun
+  `make data-up` (bumps the version).
+- **`scripts/tf.sh` unsets `VAULT_NAMESPACE`**: a caller exporting it made
+  the provider prefix it on top of the module's own namespace
+  (`red-doors/red-doors` → 403). Found live.
+- Door-6 seeding moved from `seed-doors.sh` to `data.sh` so a later
+  `make seed` can't recreate the ConfigMap with a different memo.
+- `rolloutRestartTargets` for opener-7 deferred to prompt 06 (the
+  Deployment doesn't exist yet).
+- Postgres connection inside the cluster is `sslmode=disable` (demo-grade;
+  in-cluster network only) — noted for the security-model doc.
+
+#### Validation output
+
+```text
+make data-up (first)  → postgres ready, schema, vault-database 3 added, rotate-root, ciphertext moved, ConfigMap removed
+make data-up (rerun)  → 0 changes, "owned by Vault since …", no NOTICE noise, no second rotation
+make vso-up           → vault-secrets-operator.v1.6.0 Succeeded; Secret door-7-customer-db synced
+door 4  opener-4 mints login v-red-door-payroll-…, ttl 300s ......... OK
+        role in pg_roles, VALID UNTIL = lease expiry .................. OK
+        SELECT from payroll over postgres.rd-data.svc ................. OK (20 rows)
+        same login SELECT merger_docs ................................. permission denied
+        revoke-self → role dropped from PostgreSQL .................... OK
+        reuse of the login ............................................ FATAL password authentication failed
+        impostor database/creds/payroll-reader ........................ 403
+door 7  Secret labelled managed-by hashicorp-vso ..................... OK
+        impostor reads doors/7 in Vault ............................... 403
+        make door7-rotate → Secret value changed after 22 s ........... OK
+RESULT: 11 passed, 0 failed
+```

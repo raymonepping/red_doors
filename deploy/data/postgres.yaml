@@ -1,0 +1,56 @@
+# PostgreSQL (prompt 05), namespace rd-data. Secret `postgres` is created by
+# scripts/data.sh from .secrets/data/ — never stored here.
+# Image: Red Hat's rhel9/postgresql-16 (multi-arch incl. arm64, built for
+# OpenShift's arbitrary UIDs; pulled with the cluster pull secret).
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: postgres-data, namespace: rd-data, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: rd-data
+  labels: { app.kubernetes.io/part-of: red-doors, app: postgres }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata:
+      labels: { app: postgres, app.kubernetes.io/part-of: red-doors }
+      annotations: { openshift.io/required-scc: restricted-v2 }
+    spec:
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: postgres
+          image: registry.redhat.io/rhel9/postgresql-16:latest
+          env:
+            - { name: POSTGRESQL_DATABASE, value: reddoors }
+            - { name: POSTGRESQL_USER, value: reddoors_owner }
+            - name: POSTGRESQL_PASSWORD
+              valueFrom: { secretKeyRef: { name: postgres, key: owner-password } }
+            - name: POSTGRESQL_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: postgres, key: admin-password } }
+          ports: [{ name: postgres, containerPort: 5432 }]
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } }
+          readinessProbe:
+            exec: { command: ["/usr/libexec/check-container"] }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 512Mi } }
+          volumeMounts: [{ name: data, mountPath: /var/lib/pgsql/data }]
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: postgres-data }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: postgres, namespace: rd-data, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  selector: { app: postgres }
+  ports: [{ name: postgres, port: 5432, targetPort: 5432 }]

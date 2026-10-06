@@ -6,9 +6,7 @@
 # state, git or logs. Door 2 and 8 items are seeded here too (their policies
 # arrive in prompt 04).
 #
-# Door 6: a short merger memo is encrypted with transit/merger-docs and only
-# the CIPHERTEXT is stored (ConfigMap rd-doors/merger-docs until prompt 05
-# moves it to PostgreSQL). The plaintext is not stored anywhere.
+# Door 6's merger memo is seeded by scripts/data.sh (ciphertext only, in PostgreSQL).
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
@@ -70,21 +68,5 @@ put_if_absent 8-launch-codes \
   codes="$(rand_b32 5) $(rand_b32 5) $(rand_b32 5) $(rand_b32 5)" \
   authority="two-person rule"
 
-# ── Door 6: ciphertext only ─────────────────────────────────────────────────
-require_kubeconfig
-if oc -n rd-doors get configmap merger-docs >/dev/null 2>&1; then
-  ok "merger-docs ciphertext present (unchanged)"
-else
-  # Target, price and codename are generated, so the plaintext exists only
-  # inside Vault's ciphertext — not in this script, git or the cluster.
-  targets=("Halvard Systems" "Brightwater Labs" "Kestrel Analytics" "Ostrava Grid" "Marlowe Freight")
-  codenames=(Lantern Bastion Meridian Tidewater Foxglove Halcyon)
-  target=${targets[RANDOM % ${#targets[@]}]}
-  codename=${codenames[RANDOM % ${#codenames[@]}]}
-  memo="Project $codename — acquisition of $target at EUR $((300 + RANDOM % 600))m; announce on day one of next quarter; codename stays internal."
-  ct=$(vault write -field=ciphertext transit/encrypt/merger-docs plaintext="$(printf '%s' "$memo" | base64)")
-  oc -n rd-doors create configmap merger-docs \
-    --from-literal=title="Project $codename — merger memo" \
-    --from-literal=ciphertext="$ct" >/dev/null
-  ok "merger-docs: memo encrypted with transit/merger-docs; only ciphertext stored (${ct:0:12}…)"
-fi
+# Door 6 (merger memo, ciphertext only) is seeded by scripts/data.sh straight
+# into PostgreSQL — see prompt 05.

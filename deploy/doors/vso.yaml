@@ -1,0 +1,43 @@
+# Door 7 — Vault Secrets Operator (prompt 05).
+#
+# The operator (certified, OperatorHub) is installed by scripts/vso.sh via
+# deploy/base/vso-subscription.yaml. These resources make it sync ONE secret
+# into rd-doors: the opener-7 pod reads a mounted OpenShift Secret and never
+# has a Vault address, token or role.
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultConnection
+metadata: { name: red-doors-vault, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  address: https://vault-active.rd-vault.svc:8200
+  caCertSecretRef: red-doors-ca # Secret with ca.crt, created by scripts/vso.sh
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata: { name: door-7, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  vaultConnectionRef: red-doors-vault
+  namespace: red-doors # Vault Enterprise namespace
+  method: kubernetes
+  mount: kubernetes
+  kubernetes:
+    role: vso-door-7
+    serviceAccount: vso-door-7
+    audiences: [vault]
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata: { name: door-7-customer-db, namespace: rd-doors, labels: { app.kubernetes.io/part-of: red-doors, red-doors/door: "7" } }
+spec:
+  vaultAuthRef: door-7
+  namespace: red-doors
+  type: kv-v2
+  mount: doors
+  path: 7-customer-db-password
+  refreshAfter: 30s
+  destination:
+    name: door-7-customer-db
+    create: true
+    labels: { app.kubernetes.io/part-of: red-doors, red-doors/door: "7" }
+  # rolloutRestartTargets (opener-7 Deployment) is added in prompt 06,
+  # once that Deployment exists.

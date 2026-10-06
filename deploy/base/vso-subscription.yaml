@@ -1,0 +1,14 @@
+# Vault Secrets Operator — certified operator from OperatorHub (door 7).
+# Installed cluster-wide into openshift-operators (its global OperatorGroup).
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: vault-secrets-operator
+  namespace: openshift-operators
+  labels: { app.kubernetes.io/part-of: red-doors }
+spec:
+  name: vault-secrets-operator
+  source: certified-operators
+  sourceNamespace: openshift-marketplace
+  channel: stable
+  installPlanApproval: Automatic
