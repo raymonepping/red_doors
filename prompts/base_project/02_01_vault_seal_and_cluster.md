@@ -121,3 +121,75 @@ Secrets engines, auth methods, policies (prompt 03). Identity (prompt 04).
 ## Execution log
 
 Appended by each run: what was done, deviations and why, validation output.
+
+### Run 1 — 2026-10-06
+
+#### Done
+
+- `scripts/tls.sh` (`make tls`): project CA (10y, key in `.secrets/tls/`),
+  server certs for `vault` and `vault-seal` (365d, all service/pod/Route
+  SANs), renewed when < 30 days left, missing a SAN, or not signed by the
+  current CA. Secrets `vault-tls` / `vault-seal-tls`, ConfigMap
+  `red-doors-ca` in all six namespaces.
+- `deploy/vault-seal/values.yaml`, `deploy/vault/values.yaml` (chart
+  `hashicorp/vault` 0.34.1), image `docker.io/hashicorp/vault-enterprise`
+  `2.1.0-ent@sha256:12c3ac14…` (multi-arch manifest list; arm64 digest
+  `sha256:0d596086…` confirmed with `oc image info --show-multiarch`).
+- `scripts/vault.sh` + `make vault-up | vault-unseal | vault-status |
+  seal-token-status | vault-roll | vault-down | vault-ui`.
+- Licence `lics/vault.hclic` (from Arcanium, gitignored) → Secret
+  `vault-license` in both namespaces; expires 2027-01-31.
+- Seal Vault: 1 Shamir share (same POC choice as Arcanium's vault-s),
+  stdout audit, transit key `autounseal`, policy `autounseal`
+  (encrypt/decrypt only), orphan periodic token → Secret
+  `rd-vault/vault-seal-token`.
+- Main cluster: 3 Raft voters over TLS `retry_join`, transit auto-unseal,
+  recovery key (1 share) in `.secrets/vault/cluster-init.json`, stdout audit,
+  Routes `vault.apps-crc.testing` → `vault-active` and
+  `vault-seal.apps-crc.testing` (passthrough, validated with the project CA).
+
+#### Deviations
+
+- **Seal token period 720h, not 24h.** Vault renews the token only while
+  the main cluster runs; a CRC stopped for a weekend would come back with
+  an expired 24h token and an unusable unseal chain. 720h matches
+  Arcanium; `vault-up` re-issues the token whenever TTL < 1h and rolls the
+  main cluster onto it. Renewal observed live (`last_renewal` updates).
+- **`api_addr` uses the chart default (`https://$(POD_IP):8200`).** The
+  first run set `apiAddr: https://$(HOSTNAME).vault-internal:8200`;
+  Kubernetes only expands `$(VAR)` for variables defined *earlier* in the
+  env list and the chart defines `HOSTNAME` after `VAULT_API_ADDR`, so the
+  leader advertised the literal string `https://$(HOSTNAME)…`. Found via
+  `sys/leader`; fixed and rolled.
+- **Init container `wait-for-seal-vault` added (not in the prompt).**
+  Cold-start test found that Vault checks its transit seal at startup and
+  *exits* (`error parsing Seal configuration … Vault is sealed`) when the
+  seal Vault is sealed: 6 restarts → CrashLoopBackOff with up to 5 min of
+  backoff. The init container (same image, `vault status` against the seal
+  Vault, exit 0 only when unsealed) holds the pods in `Init` with a clear
+  log line until `make vault-unseal`; then they start in seconds.
+- **Readiness = HTTPS `/v1/sys/health?standbyok&perfstandbyok&sealedcode=204&uninitcode=204`**
+  instead of the chart default `vault status -tls-skip-verify`; liveness off.
+- **`make vault-roll` added.** The chart's StatefulSet is `OnDelete`; config
+  changes need a controlled roll (standbys first, leader last, each back
+  unsealed + 3 voters before the next).
+- `vault-tls/` (public certs, per machine) gitignored except its README.
+
+#### Validation output
+
+```text
+make vault-up (first)      → seal init+unseal, transit/key/policy/token, main init, vault-0/1/2 unsealed, Raft 3 voters, exit 0
+make vault-up (rerun)      → nothing re-created, no restarts, 7.7 s
+failover (make vault-roll) → leader vault-0 → vault-1; Route probe every 0.5 s: 44/51 OK,
+                             7 refused over ~3.5 s while vault-active moved; all back unsealed, 3 voters
+seal Vault pod deleted     → comes back {"initialized":true,"sealed":true}; main cluster keeps serving
+                             (sys/health sealed=false, secrets list OK); make vault-unseal → unsealed
+cold start                 → main scaled 0 → seal Vault restarted (sealed) → main scaled 3:
+                             60 s later all Pending/Init, 0 restarts, log "waiting: seal Vault … sealed";
+                             make vault-unseal → all 3 unsealed after 3 s, no main-cluster keys used — PASS
+                             (first leader election after the cold start takes a few seconds; status during
+                             that window shows 3 standbys)
+make seal-token-status     → TTL 719h 59m, period 2592000s, orphan, policies autounseal, renewing
+make vault-status          → seal Vault unsealed; vault-2 LEADER, vault-0/1 standby; licence 2027-01-31
+CRC RAM                    → 8.1 GB of 25.1 GB with both Vaults running
+```

@@ -234,3 +234,6 @@ lics/*.hclic
 .output/
 # macOS AppleDouble files (they also break in-cluster Node builds)
 ._*
+# Project TLS (scripts/tls.sh) — per machine; keys are in .secrets/tls/
+vault-tls/*
+!vault-tls/README.md

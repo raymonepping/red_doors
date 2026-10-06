@@ -161,6 +161,13 @@ Before writing code, read these and list what you reuse and what you change:
 9. **Never fabricate evidence.** If the UI shows something, the API read it
    from Vault, OpenShift or the audit stream. Missing data shows as
    missing.
+10. **Kubernetes `$(VAR)` expansion is order-dependent** (found in prompt 02):
+    a variable is only expanded if it is defined *earlier* in the container's
+    env list. Check rendered manifests (`helm template`) for literal `$(…)`.
+11. **A transit-sealed Vault exits at startup if its seal Vault is sealed**
+    (found in prompt 02) — it doesn't wait. Main pods carry a
+    `wait-for-seal-vault` init container; any new Vault workload that depends
+    on another service at startup needs the same explicit wait.
 
 ---
 

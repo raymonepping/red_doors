@@ -1,0 +1,143 @@
+# Helm values — main Vault Enterprise cluster (release `vault`, namespace rd-vault).
+#
+# 3 Raft nodes, auto-unsealed through the seal Vault's Transit key
+# (rd-vault-seal). The seal token comes from Secret vault-seal-token
+# (periodic orphan token, policy autounseal — scripts/vault-up.sh).
+global:
+  openshift: true
+  tlsDisable: false
+
+injector:
+  enabled: false # Red Doors uses the Vault Secrets Operator and direct auth
+
+server:
+  image:
+    repository: docker.io/hashicorp/vault-enterprise
+    # multi-arch manifest list (amd64 + arm64); CRC on Apple Silicon is arm64
+    tag: "2.1.0-ent@sha256:12c3ac1469d11da17747927128ed11bce825a012d3ce13b066d0442d0105df0a"
+
+  enterpriseLicense:
+    secretName: vault-license
+    secretKey: license
+
+  resources:
+    requests: { cpu: 250m, memory: 384Mi }
+    limits: { memory: 1Gi }
+
+  extraEnvironmentVars:
+    VAULT_CACERT: /vault/userconfig/vault-tls/ca.crt
+
+  # The transit seal reads its token from VAULT_TOKEN.
+  extraSecretEnvironmentVars:
+    - envName: VAULT_TOKEN
+      secretName: vault-seal-token
+      secretKey: token
+
+  extraVolumes:
+    - type: secret
+      name: vault-tls
+
+  # Found live (cold-start test): Vault checks its transit seal at STARTUP and
+  # exits ("error parsing Seal configuration … Vault is sealed") when the seal
+  # Vault is sealed — the pods crash-loop into a 5-minute backoff. This init
+  # container holds them in an honest `Init` state until the seal Vault is
+  # unsealed (`vault status` exits 0 only when unsealed), then Vault starts
+  # within seconds.
+  extraInitContainers:
+    - name: wait-for-seal-vault
+      image: docker.io/hashicorp/vault-enterprise:2.1.0-ent@sha256:12c3ac1469d11da17747927128ed11bce825a012d3ce13b066d0442d0105df0a
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          until vault status -address=https://vault-seal.rd-vault-seal.svc:8200 \
+                -ca-cert=/vault/userconfig/vault-tls/ca.crt >/dev/null 2>&1; do
+            echo "$(date -u +%FT%TZ) waiting: seal Vault (rd-vault-seal) is sealed or unreachable — run: make vault-unseal"
+            sleep 5
+          done
+          echo "$(date -u +%FT%TZ) seal Vault is unsealed — starting Vault"
+      volumeMounts:
+        - name: userconfig-vault-tls
+          mountPath: /vault/userconfig/vault-tls
+          readOnly: true
+      resources:
+        requests: { cpu: 10m, memory: 32Mi }
+        limits: { memory: 64Mi }
+
+  readinessProbe:
+    enabled: true
+    # HTTPS health check instead of the chart default `vault status -tls-skip-verify`;
+    # standbys and perf standbys count as ready.
+    path: "/v1/sys/health?standbyok=true&perfstandbyok=true&sealedcode=204&uninitcode=204"
+  livenessProbe:
+    enabled: false
+
+  dataStorage:
+    enabled: true
+    size: 2Gi
+  auditStorage:
+    enabled: false # file audit device writes to stdout; socket device added in prompt 07
+
+  # Single-node CRC: the chart's default required pod anti-affinity on
+  # kubernetes.io/hostname would leave vault-1 and vault-2 Pending forever.
+  affinity: ""
+
+  route:
+    enabled: true
+    activeService: true # vault.apps-crc.testing → vault-active (the leader)
+    host: vault.apps-crc.testing
+    tls:
+      termination: passthrough # Vault's own cert, validated with vault-tls/ca.pem
+
+  ha:
+    enabled: true
+    replicas: 3
+    # apiAddr left at the chart default (https://$(POD_IP):8200): Kubernetes only
+    # expands $(VAR) for variables defined EARLIER in the env list, and the
+    # chart defines HOSTNAME after VAULT_API_ADDR — "$(HOSTNAME)" there stayed
+    # literal (found live: leader_address = "https://$(HOSTNAME).vault-internal:8200").
+    clusterAddr: "https://$(HOSTNAME).vault-internal:8201"
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        ui = true
+        log_level = "info"
+
+        listener "tcp" {
+          address         = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_cert_file   = "/vault/userconfig/vault-tls/tls.crt"
+          tls_key_file    = "/vault/userconfig/vault-tls/tls.key"
+          # client certs are requested but not required: door 5 (cert auth)
+          # presents one, everyone else doesn't
+        }
+
+        storage "raft" {
+          path = "/vault/data"
+
+          retry_join {
+            leader_api_addr     = "https://vault-0.vault-internal:8200"
+            leader_ca_cert_file = "/vault/userconfig/vault-tls/ca.crt"
+          }
+          retry_join {
+            leader_api_addr     = "https://vault-1.vault-internal:8200"
+            leader_ca_cert_file = "/vault/userconfig/vault-tls/ca.crt"
+          }
+          retry_join {
+            leader_api_addr     = "https://vault-2.vault-internal:8200"
+            leader_ca_cert_file = "/vault/userconfig/vault-tls/ca.crt"
+          }
+        }
+
+        seal "transit" {
+          address         = "https://vault-seal.rd-vault-seal.svc:8200"
+          key_name        = "autounseal"
+          mount_path      = "transit/"
+          tls_ca_cert     = "/vault/userconfig/vault-tls/ca.crt"
+          tls_server_name = "vault-seal.rd-vault-seal.svc"
+        }
+
+        service_registration "kubernetes" {}
+
+ui:
+  enabled: true
