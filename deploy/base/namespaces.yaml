@@ -1,0 +1,69 @@
+# Red Doors namespaces (OpenShift projects). Applied by `make namespaces`.
+# One namespace per trust zone, so NetworkPolicies and Vault Kubernetes-auth
+# role bindings can name exactly who may talk to what.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rd-vault-seal
+  labels:
+    app.kubernetes.io/part-of: red-doors
+    red-doors/zone: seal
+  annotations:
+    openshift.io/display-name: "Red Doors — seal Vault"
+    openshift.io/description: "1-node Vault providing Transit auto-unseal for rd-vault. Root of trust."
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rd-vault
+  labels:
+    app.kubernetes.io/part-of: red-doors
+    red-doors/zone: vault
+  annotations:
+    openshift.io/display-name: "Red Doors — Vault Enterprise"
+    openshift.io/description: "3-node Vault Enterprise (Raft), transit-sealed by rd-vault-seal."
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rd-identity
+  labels:
+    app.kubernetes.io/part-of: red-doors
+    red-doors/zone: identity
+  annotations:
+    openshift.io/display-name: "Red Doors — identity"
+    openshift.io/description: "OpenLDAP + Keycloak (Vault's OIDC provider)."
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rd-data
+  labels:
+    app.kubernetes.io/part-of: red-doors
+    red-doors/zone: data
+  annotations:
+    openshift.io/display-name: "Red Doors — data"
+    openshift.io/description: "PostgreSQL: payroll (door 4), merger ciphertext (door 6), API schema."
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rd-doors
+  labels:
+    app.kubernetes.io/part-of: red-doors
+    red-doors/zone: doors
+  annotations:
+    openshift.io/display-name: "Red Doors — door openers"
+    openshift.io/description: "One opener workload per machine door, each with its own identity."
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rd-app
+  labels:
+    app.kubernetes.io/part-of: red-doors
+    red-doors/zone: app
+  annotations:
+    openshift.io/display-name: "Red Doors — app"
+    openshift.io/description: "red-doors-api (internal) and red-doors-ui (Route doors.apps-crc.testing)."

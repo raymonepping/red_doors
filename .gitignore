@@ -223,3 +223,14 @@ input/*
 !input/.gitkeep
 output/*
 !output/.gitkeep
+
+# ── Red Doors ───────────────────────────────────────────────────────────────
+# Vault Enterprise licence (lics/README.md stays tracked)
+lics/*.hclic
+# kubeconfigs anywhere (the project's own lives in .secrets/kube/config)
+*.kubeconfig
+# Nuxt build output
+.nuxt/
+.output/
+# macOS AppleDouble files (they also break in-cluster Node builds)
+._*

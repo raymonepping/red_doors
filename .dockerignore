@@ -34,3 +34,9 @@ Thumbs.db
 Dockerfile
 docker-compose.yml
 
+
+# Red Doors — never send secrets or macOS AppleDouble files into a build context
+._*
+.secrets
+.nuxt
+.output
