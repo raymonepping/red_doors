@@ -157,6 +157,13 @@ reconcile_keycloak() {
   else
     kc update "components/$mapper_id" -r red-doors "${mapper_cfg[@]}" >/dev/null
   fi
+  # Keycloak's default LDAP "first name" mapper reads cn (the FULL name), so
+  # names showed as "Ada Lindqvist Lindqvist". Read givenName instead.
+  local fn_id
+  fn_id=$(kc get components -r red-doors -q name="first name" --fields id,parentId --format csv --noquotes 2>/dev/null | awk -F, -v p="$ldap_id" '$2==p {print $1}' | head -1)
+  if [ -n "$fn_id" ]; then
+    kc update "components/$fn_id" -r red-doors -s 'config."ldap.attribute"=["givenName"]' >/dev/null
+  fi
   kc create "user-storage/$ldap_id/sync?action=triggerFullSync" -r red-doors >/dev/null
   kc create "user-storage/$ldap_id/mappers/$mapper_id/sync?direction=fedToKeycloak" -r red-doors >/dev/null
   ok "Keycloak: LDAP users + groups synced ($(kc get groups -r red-doors --fields name --format csv --noquotes | paste -sd ',' -))"

@@ -228,7 +228,7 @@ app.post('/api/v1/doors/2/open', async (req, res, next) => {
       denial = vaultDenial(err, 'read');
     }
     const saved = await record({ door: 2, mode: 'human', triggered_by: who.username, opened_by, outcome, decision, denial, request_ids });
-    res.json({ attempt_id: saved.id, at: saved.created_at, door: 2, outcome, identity: opened_by, vault: { ...decision, request_ids }, released, denial });
+    res.json({ attempt_id: saved.id, at: saved.created_at, door: 2, triggered_by: who.username, outcome, identity: opened_by, vault: { ...decision, request_ids }, released, denial });
   } catch (err) {
     next(err);
   }
@@ -267,13 +267,26 @@ app.post('/api/v1/doors/8/requests', async (req, res, next) => {
   }
 });
 
+// Vault auto-names OIDC-created entities "entity_xxxx"; show the person instead.
+const entityNames = new Map();
+async function personName(entityId, fallback) {
+  if (!entityId) return fallback ?? null;
+  if (!entityNames.has(entityId)) {
+    const name = await asApi('GET', `identity/entity/id/${entityId}`)
+      .then((e) => e.data.aliases?.[0]?.name ?? e.data.name)
+      .catch(() => fallback ?? entityId);
+    entityNames.set(entityId, name);
+  }
+  return entityNames.get(entityId);
+}
+
 async function requestStatus(token, accessor) {
   const r = await asUser(token, 'POST', 'sys/control-group/request', { body: { accessor } });
   return {
     approved: r.data.approved,
     request_path: r.data.request_path,
     requester: { entity_id: r.data.request_entity?.id, name: r.data.request_entity?.name },
-    authorizations: (r.data.authorizations ?? []).map((a) => ({ entity_id: a.entity_id, name: a.entity_name })),
+    authorizations: await Promise.all((r.data.authorizations ?? []).map(async (a) => ({ entity_id: a.entity_id, name: await personName(a.entity_id, a.entity_name) }))),
     request_id: r.request_id,
   };
 }

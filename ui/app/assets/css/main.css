@@ -958,3 +958,9 @@ a:hover { color: var(--vg-focus); }
   --rd-room-far:      #dfe6ee;
   --rd-doorway:       #1b2433;   /* the dark reveal when the door swings */
 }
+
+/* Red Doors layout guards: grid/flex children may shrink below their content
+   (wide tables, the corridor strip and policy text scroll inside their panel,
+   never the page), and panels never stretch their rows apart. */
+.vg-content > * , .vg-content [class*='__body'] > *, .vg-content [class*='__side'] > * { min-width: 0; }
+.vg-glass { align-content: start; }

@@ -126,3 +126,12 @@ api-test: ## Unit tests (synthetic audit fixtures) — no cluster needed
 
 api-smoke: ## Live smoke test of every endpoint through the real cluster
 	@./scripts/api-smoke.sh
+
+# ── UI + BFF (frontend 01_01) ───────────────────────────────────────────────
+.PHONY: ui-up ui-open
+
+ui-up: ## Build (in-cluster, on change) and deploy the UI + BFF → https://doors.apps-crc.testing
+	@./scripts/ui.sh up
+
+ui-open: ## Open the Red Doors UI
+	@open https://doors.apps-crc.testing

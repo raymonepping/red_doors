@@ -104,7 +104,7 @@ const uid = useId()
 .rd-door[data-size='lg'] { --w: clamp(180px, 22vw, 260px); }
 /* In perspective the swung leaf's near edge projects ~10% below the frame;
    reserve that space so it never overlaps what sits underneath. */
-.rd-door:not([data-size='sm']) { padding-bottom: calc(var(--w) * 0.14); }
+.rd-door:not([data-size='sm']) { padding-block: calc(var(--w) * 0.1) calc(var(--w) * 0.14); }
 .rd-door[data-size='md'] { --w: 132px; }
 .rd-door[data-size='sm'] { --w: 44px; }
 

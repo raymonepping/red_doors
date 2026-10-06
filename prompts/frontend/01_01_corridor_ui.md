@@ -106,3 +106,61 @@ must be 0 violations (full suite in `02_01`).
 ## Execution log
 
 Appended by each run: what was done, deviations and why, validation output.
+
+### Run 1 — 2026-10-06
+
+#### Done
+
+- **BFF** (`ui/server/`): `/auth/login` asks Vault for Keycloak's authorize
+  URL (role `visitor`, `client_nonce` cookie), `/auth/callback` exchanges
+  the code with Vault → the person's Vault token → server-side session
+  (`utils/session.ts`, Nitro storage, httpOnly/SameSite=Lax cookie, Secure
+  behind the Route), `/auth/logout` revokes the token. `/api/session` (no
+  token exposed). `/api/v1/**` proxy: `X-Triggered-By`, the person's token
+  only for human doors, door-8 wrapping tokens kept in the requester's
+  session (stripped from responses, injected on Open, `can_open` flag),
+  auditors read-only for knocks.
+- **Pages**: Sign-in, Corridor (guided, story order, receding row, keyboard
+  `← → K W D`, session progress), All doors, Door detail (room, decision
+  panel, identity chips, audit drawer, recent attempts), Approvals (door 8
+  for requesters/approvers/auditors), Audit (live feed, collector-offline
+  banner), Cluster (seal chain, nodes, licence, collector, openers, VSO).
+- **Components**: `DoorStage`, `DecisionPanel`, `RoomValue`,
+  `IdentityChips`, `AuditDrawer`, `OutcomePill`; shell = the skill's
+  `shell.css` (rail, floating topbar, ⌘K palette, user menu).
+- **Deploy**: `ui/Dockerfile` (two-stage, `USER 1001`, read-only root FS),
+  `deploy/app/ui.yaml` (Route `doors.apps-crc.testing` edge, NetworkPolicy:
+  router only), `scripts/ui.sh` (`make ui-up | ui-open`, clean source copy
+  uploaded to the in-cluster build).
+
+#### Deviations / fixes found by looking
+
+- Keycloak's default LDAP "first name" mapper reads `cn` → names rendered
+  "Ada Lindqvist Lindqvist"; `identity.sh` now maps it to `givenName`.
+- Phone: the vault-ui-design shell hid the rail below 900 px and the user
+  menu below 1180 px — no navigation or sign-out on phones. Added a menu
+  button that opens the rail as a sheet, and kept the user menu visible.
+  (Worth folding back into the skill's `shell.css`.)
+- Grid children could not shrink (page-wide horizontal scroll on phones):
+  `min-width: 0` guards; long chips/policy text wrap inside their panel.
+- The swung door also projects upward in perspective → `RedDoor` reserves
+  space above and below.
+- API: door 2 now returns `triggered_by`; door-8 approver entity ids are
+  resolved to the person's alias name (Vault auto-names OIDC entities
+  `entity_xxxx`).
+- Room labels humanised; revocation/lease shown once, as a sentence.
+
+#### Validation output
+
+```text
+Browser (real Vault OIDC → Keycloak → LDAP, Playwright, 1440×900 and 390×844):
+  ada: corridor door 1 knock (K) → Opened by Vault · wrong key (W) → Refused by Vault
+       door 4 detail → minted DB login + 5 payroll rows + revoked-at · door 2 → Opened by Vault
+  ben: door 2 → Refused by Vault (HTTP 403 permission denied, policy text shown)
+door 8 (three browsers):
+  cleo requests → pending, held in her session · dirk approves → Approved · cleo opens → codes
+  eve self-approves → "recorded but did not count … (Sentinel EGP door-8-two-different-people)"
+  eve opens → "Refused by Vault: Request needs further authorization" · dirk approves → eve opens
+axe WCAG 2.1 A/AA → 54 page scans (sign-in + 13 routes × ada/finn × 2 viewports): 0 violations
+screenshots → docs/screenshots/ui/ (25)
+```

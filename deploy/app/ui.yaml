@@ -1,0 +1,86 @@
+# Red Doors UI + BFF (frontend 01_01), namespace rd-app.
+# Route doors.apps-crc.testing (edge TLS). The BFF talks to Vault (OIDC) and
+# to the API; the browser only ever talks to this origin.
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata: { name: red-doors-ui, namespace: rd-app, labels: { app.kubernetes.io/part-of: red-doors } }
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata: { name: red-doors-ui, namespace: rd-app, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  source: { type: Binary }
+  strategy: { type: Docker, dockerStrategy: {} }
+  output: { to: { kind: ImageStreamTag, name: "red-doors-ui:latest" } }
+  resources: { limits: { memory: 2Gi } }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: red-doors-ui, namespace: rd-app, labels: { app.kubernetes.io/part-of: red-doors } }
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: red-doors-ui
+  namespace: rd-app
+  labels: { app.kubernetes.io/part-of: red-doors, app: red-doors-ui }
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"red-doors-ui:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"ui\")].image"}]'
+spec:
+  replicas: 1
+  # sessions live in memory: one replica (a restart signs everyone out — demo-grade)
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: red-doors-ui } }
+  template:
+    metadata:
+      labels: { app: red-doors-ui, app.kubernetes.io/part-of: red-doors }
+      annotations: { openshift.io/required-scc: restricted-v2 }
+    spec:
+      serviceAccountName: red-doors-ui
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: ui
+          image: image-registry.openshift-image-registry.svc:5000/rd-app/red-doors-ui:latest
+          env:
+            - { name: NUXT_API_INTERNAL_URL, value: "http://red-doors-api.rd-app.svc:3001" }
+            - { name: NUXT_VAULT_ADDR, value: "https://vault-active.rd-vault.svc:8200" }
+            - { name: NUXT_OIDC_REDIRECT_URI, value: "https://doors.apps-crc.testing/auth/callback" }
+            - { name: NUXT_PUBLIC_DESIGN_SHEET, value: "true" }
+          ports: [{ name: http, containerPort: 3000 }]
+          readinessProbe: { httpGet: { path: /login, port: 3000 }, periodSeconds: 10 }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] }, readOnlyRootFilesystem: true }
+          resources: { requests: { cpu: 50m, memory: 96Mi }, limits: { memory: 384Mi } }
+          volumeMounts:
+            - { name: ca, mountPath: /ca, readOnly: true }
+      volumes:
+        - name: ca
+          configMap: { name: red-doors-ca }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: red-doors-ui, namespace: rd-app, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  selector: { app: red-doors-ui }
+  ports: [{ name: http, port: 3000 }]
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata: { name: red-doors-ui, namespace: rd-app, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  host: doors.apps-crc.testing
+  to: { kind: Service, name: red-doors-ui }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }
+---
+# The UI is reached only through the router.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: red-doors-ui-ingress, namespace: rd-app, labels: { app.kubernetes.io/part-of: red-doors } }
+spec:
+  podSelector: { matchLabels: { app: red-doors-ui } }
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ namespaceSelector: { matchLabels: { policy-group.network.openshift.io/ingress: "" } } }]
+      ports: [{ protocol: TCP, port: 3000 }]
