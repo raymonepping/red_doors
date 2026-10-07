@@ -29,7 +29,7 @@ passwords).
 | Data + VSO | `data-up`, `vso-up`, `door7-rotate`, `door7-status` |
 | Doors | `openers-up`, `knock DOOR=n`, `knock-wrong DOOR=n` |
 | API | `api-up`, `api-test` (unit, no cluster), `api-smoke` (39 live checks) |
-| UI | `ui-up`, `ui-open`, `ui-test` (25 Playwright journeys + axe), `ui-test-failover`, `ui-screens` |
+| UI | `ui-up`, `ui-open`, `trust` / `untrust` / `trust-status` (macOS keychain), `ui-test` (25 Playwright journeys + axe), `ui-test-failover`, `ui-screens` |
 | Estate | `up`, `down`, `verify`, `scenarios`, `reset` |
 
 Builds happen inside the cluster and only when the source hash changes

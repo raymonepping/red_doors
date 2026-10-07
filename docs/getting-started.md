@@ -101,12 +101,14 @@ make demo-users
 
 Open <https://doors.apps-crc.testing> → **Sign in** → Keycloak login →
 back in the corridor. The browser warns about the certificate the first
-time: it is signed by OpenShift Local's ingress CA. To trust it:
+time: it is signed by OpenShift Local's ingress CA. To trust it, and the
+project CA that signs the Vault UI, run (asks for your password):
 
 ```sh
-sudo security add-trusted-cert -d -r trustRoot \
-  -k /Library/Keychains/System.keychain vault-tls/ingress-ca.pem
+make trust          # make trust-status to check, make untrust to undo
 ```
+
+Restart the browser afterwards.
 
 ## 7. Next
 
@@ -116,6 +118,6 @@ sudo security add-trusted-cert -d -r trustRoot \
 
 Other URLs: Vault UI <https://vault.apps-crc.testing> (token:
 `.secrets/vault/admin-token`, namespace `red-doors`; its certificate comes
-from the project CA, so trust `vault-tls/ca.pem` the same way), Keycloak
+from the project CA, which `make trust` also trusts), Keycloak
 <https://keycloak.apps-crc.testing>, OpenShift console via
 `make crc-console`.

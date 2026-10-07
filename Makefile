@@ -128,13 +128,22 @@ api-smoke: ## Live smoke test of every endpoint through the real cluster
 	@./scripts/api-smoke.sh
 
 # ── UI + BFF (frontend 01_01) ───────────────────────────────────────────────
-.PHONY: ui-up ui-open ui-test ui-test-failover ui-screens
+.PHONY: ui-up ui-open ui-test ui-test-failover ui-screens trust untrust trust-status
 
 ui-up: ## Build (in-cluster, on change) and deploy the UI + BFF → https://doors.apps-crc.testing
 	@./scripts/ui.sh up
 
 ui-open: ## Open the Red Doors UI
 	@open https://doors.apps-crc.testing
+
+trust: ## Trust the OpenShift ingress CA + Red Doors Project CA in the macOS keychain (sudo)
+	@./scripts/trust.sh trust
+
+untrust: ## Remove both CAs from the macOS keychain (sudo)
+	@./scripts/trust.sh untrust
+
+trust-status: ## Show whether the keychain trusts both CAs
+	@./scripts/trust.sh status
 
 ui-test: ## Playwright journeys + axe gate against the live UI (real OIDC, real Vault)
 	@cd ui && npx playwright test

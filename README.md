@@ -49,8 +49,8 @@ make demo-users  # sign-in names and passwords
 
 Open **<https://doors.apps-crc.testing>**, sign in as `ada`, and walk the
 corridor (keys: `←` `→` move, `K` knock, `W` wrong key, `D` decision).
-The certificate is from OpenShift Local's own CA; accept it, or trust
-`vault-tls/ingress-ca.pem` in your keychain.
+The certificate is from OpenShift Local's own CA; accept it, or run
+`make trust` once to trust it (and the Vault UI's CA) in your keychain.
 
 `make down` stops everything and keeps all data; `make up` brings it back.
 
