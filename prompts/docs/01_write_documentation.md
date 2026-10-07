@@ -42,3 +42,39 @@ Check all relative links. Markdown lint clean.
 ## Execution log
 
 Appended by each run: what was done, deviations and why, validation output.
+
+### Run 2026-10-07
+
+#### What was done
+
+- `README.md` rewritten (thesis, eight doors, prerequisites, run, links).
+- `docs/README.md` (index), `getting-started.md`, `architecture.md`
+  (mermaid diagram of the running system), `doors.md` (policy text from
+  `terraform/*/policies` and the Sentinel EGP), `demo-guide.md` (15- and
+  5-minute run sheets), `operations.md`, `troubleshooting.md` (from the
+  execution logs of prompts 01–08 and frontend 01–02), `security-model.md`.
+- `CHANGELOG.md`: 1.0.0.
+
+#### Deviations and why
+
+- Role/SA names in `architecture.md` were checked against Terraform
+  (`opener-5-issuer`, SA `impostor`, SA `vso-door-7`), not the prompt text.
+- The dry run found one mismatch: the Vault UI Route is passthrough TLS and
+  presents the project CA (`vault-tls/ca.pem`), not the ingress CA;
+  `getting-started.md` now says so.
+
+#### Validation output
+
+```text
+dry run of getting-started.md (CRC download skipped):
+  tools: bash 5.3, jq 1.8.2, terraform 1.14.2, vault 2.1.0+ent, node 25.2, openssl 3.6.3, crc 2.64.0
+  pull secret ✓ licence ✓
+  make crc-up        → CRC already running; kubeconfig refreshed
+  make up            → 51 s, verify 40/40
+  make verify        → ✓ All checks passed (40 pass, 0 warn)
+  make demo-users    → 6 users, groups as documented
+  https://doors.apps-crc.testing 200 (ingress CA) · https://vault.apps-crc.testing/ui/ 200 (project CA)
+  https://keycloak.apps-crc.testing 302
+relative links (README, docs, scenarios) → 0 broken
+markdownlint (MD013 off, as for all prompts) → clean
+```
