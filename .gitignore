@@ -237,3 +237,5 @@ lics/*.hclic
 # Project TLS (scripts/tls.sh) — per machine; keys are in .secrets/tls/
 vault-tls/*
 !vault-tls/README.md
+ui/tests/.results/
+ui/tests/.report/

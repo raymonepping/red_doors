@@ -71,3 +71,59 @@ crc stop && crc start && make up && make verify   # survives a cluster restart
 ## Execution log
 
 Appended by each run: what was done, deviations and why, validation output.
+
+### Run 2026-10-06/07
+
+#### What was done
+
+- `scripts/rehydrate.sh` (`make up`, `make up FROM=N`, `--list`): 15
+  idempotent steps from CRC to verify; a failed step names its resume point.
+- `scripts/verify-stack.sh` (`make verify`): CRC + cluster operators, seal
+  chain + seal-token TTL, 3/3 unsealed + Raft voters, licence, admin-token
+  TTL, both audit devices, every deployment, opener `/health`, API health +
+  collector, VSO sync, UI, and every door owner-opens / wrong-key-refused.
+  Bad credentials are ✗, never "starting".
+- `scripts/down.sh` (`make down`: scale to 0, `vault.sh down`, `crc stop` —
+  no PVC or `.secrets/` touched), `scripts/reset.sh` (`make reset`: typed
+  `red-doors` confirmation, deletes the namespaces and generated state),
+  `make scenarios`.
+- `scenarios/lib.sh` + `01_kill_leader` … `06_rotate_door7`, each with a
+  README holding the 3-line presenter script; `scenarios/README.md` index.
+
+#### Deviations and why
+
+- Scenario 03 runs the cold start itself (scales Vault + seal Vault to 0
+  and back) instead of a full `make down && make up`, so it fits a live
+  demo; the full cycle is the `crc stop && crc start` validation below.
+- Scenario 04: Vault keeps a **stdout** audit device (not a file device) —
+  OpenShift's restricted SCC and the log pipeline make stdout the
+  always-available sink.
+- Scenario 05 door 8 needs a 10-minute wait, so it runs only with `--long`.
+
+#### Found during validation (fixed / documented)
+
+- After the Mac slept, the CRC VM's clock jumped forward 32 min (chronyd
+  "Forward time jump detected"): projected SA tokens looked expired for
+  ~40 s (Vault Kubernetes login 403), the builder registry token went stale,
+  and the API's DB lease was revoked while its `setTimeout` slept. The API
+  now renews against the wall clock and re-mints on `28P01` (see frontend
+  02_01's log). The stale-token window is documented for troubleshooting.
+
+#### Validation output
+
+```text
+make up (1st)            → 15 steps, 50 s, verify 40/40
+make up (2nd)            → 50 s; terraform 7× "0 added, 0 changed, 0 destroyed";
+                           door values "present (unchanged)"; no image rebuilt; verify 40/40
+make verify              → ✓ All checks passed (40 pass, 0 warn)
+scenarios/01_kill_leader → PASS: leader vault-2 → vault-0; 39/40 knocks opened during failover; pod back unsealed
+scenarios/02_seal_vault_restart → PASS: seal Vault SEALED, main cluster kept serving; unsealed again
+scenarios/03_cold_start  → PASS: main pods waited (0 restarts); auto-unsealed 8 s after the seal Vault
+scenarios/04_collector_offline → PASS: Vault served in 0.82 s with the API at 0; socket reconnected by itself
+scenarios/05_expiry --long → PASS: door 3 unwrap refused, door 5 expired cert refused,
+                           door 4 revoked login refused, door 8 unapproved request expired
+scenarios/06_rotate_door7 → PASS: new value after 6 s, opener-7 rolled by VSO
+crc stop && crc start && make up && make verify
+                         → stop ≈15 s, start 185 s, make up 108 s (seal Vault unsealed from
+                           .secrets/, 3/3 transit auto-unsealed, leader vault-1), verify 40/40; total 308 s
+```

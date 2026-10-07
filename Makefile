@@ -128,10 +128,37 @@ api-smoke: ## Live smoke test of every endpoint through the real cluster
 	@./scripts/api-smoke.sh
 
 # ── UI + BFF (frontend 01_01) ───────────────────────────────────────────────
-.PHONY: ui-up ui-open
+.PHONY: ui-up ui-open ui-test ui-test-failover ui-screens
 
 ui-up: ## Build (in-cluster, on change) and deploy the UI + BFF → https://doors.apps-crc.testing
 	@./scripts/ui.sh up
 
 ui-open: ## Open the Red Doors UI
 	@open https://doors.apps-crc.testing
+
+ui-test: ## Playwright journeys + axe gate against the live UI (real OIDC, real Vault)
+	@cd ui && npx playwright test
+
+ui-test-failover: ## Playwright @failover: delete the active Vault pod, expect a new leader
+	@cd ui && RD_ALL=1 RD_FAILOVER=1 npx playwright test --grep @failover
+
+ui-screens: ## Every screen at 1440×900 and 390×844 → docs/screenshots/ui/
+	@cd ui && RD_ALL=1 npx playwright test --grep @screens
+
+# ── Whole estate (prompt 08) ────────────────────────────────────────────────
+.PHONY: up down verify scenarios reset
+
+up: ## Bring EVERYTHING to the desired state (idempotent); resume with: make up FROM=N
+	@./scripts/rehydrate.sh $(if $(FROM),--from $(FROM),)
+
+down: ## Stop everything and CRC — no data is deleted
+	@./scripts/down.sh
+
+verify: ## ✓/✗ health of the whole estate, incl. every door owner-opens / wrong-key-refused
+	@./scripts/verify-stack.sh
+
+scenarios: ## Run resilience scenarios 01–06 (each prints PASS/FAIL)
+	@for s in scenarios/0*/run.sh; do $$s || exit 1; done
+
+reset: ## DESTRUCTIVE: delete all Red Doors data (asks you to type red-doors)
+	@./scripts/reset.sh
